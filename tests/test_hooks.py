@@ -64,6 +64,24 @@ class Hooks(unittest.TestCase):
             self.agent_appends('\n' + paragraphs(2, tag=f'a{n}'))
         self.assertEqual(self.hook('stop', stop_hook_active=False)['decision'], 'block')
 
+    def test_editing_owed_text_again_does_not_launder_it(self):
+        self.agent_appends('\n' + paragraphs(6, tag='a'))
+        self.hook('pre', tool_name='Edit', tool_input={'file_path': str(self.doc)})
+        self.doc.write_text(self.doc.read_text().replace('bravo', 'bravvo'))  # a typo fix in every block
+        self.hook('post', tool_name='Edit', tool_input={'file_path': str(self.doc)})
+        self.assertEqual(self.hook('stop', stop_hook_active=False)['decision'], 'block')
+
+    def test_the_skills_own_passes_are_not_billed_as_agent_text(self):
+        script = ROOT / 'skills' / 'distill' / 'scripts' / 'distill.py'
+        cli = lambda *a: subprocess.run([sys.executable, str(script), str(self.doc), *a],
+                                        capture_output=True, text=True, env=self.env)
+        cli()  # the stamp has no sidecar entry yet, so this trusts it and starts one
+        self.doc.write_text(self.doc.read_text() + '\n' + paragraphs(6, tag='h'))
+        cli()  # a distillation of the human's addition is now running on the doc
+        self.agent_appends('\n' + paragraphs(6, tag='a'))
+        cli('--reset')
+        self.assertIsNone(self.hook('stop', stop_hook_active=False))
+
     def test_an_unstamped_doc_is_not_watched(self):
         other = self.dir / 'notes.md'
         other.write_text(paragraphs(3))

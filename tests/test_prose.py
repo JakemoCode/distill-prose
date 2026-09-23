@@ -39,6 +39,11 @@ class Presets(unittest.TestCase):
         self.assertEqual(prose.verdict(curve, 'moderate'), (False, 'blocked'))
 
 
+class Curves(unittest.TestCase):
+    def test_the_curve_starts_at_the_peak_and_collapses_repeats(self):
+        self.assertEqual(prose.curve_of([180, 200, 150, 150, 140]), [200, 150, 140])
+
+
 class Stamps(unittest.TestCase):
     def test_a_stamp_round_trips(self):
         line = prose.format_stamp('a1b2c3', 'moderate', 539, 310)

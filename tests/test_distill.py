@@ -90,6 +90,38 @@ class Session(unittest.TestCase):
         self.run_step('undo')
         self.assertEqual(self.doc.read_text(), paragraphs(20))
 
+    def test_a_shape_pass_that_cuts_is_refused(self):
+        self.write(paragraphs(20))
+        self.run_step()
+        self.write(paragraphs(19))
+        self.run_step()
+        self.write(paragraphs(9))
+        self.assertIn('Pass 2 removed', text_of(self.run_step()))
+
+    def test_a_pass_that_raises_the_peak_protects_its_new_anchors(self):
+        self.write(paragraphs(20))
+        self.run_step()
+        self.write(paragraphs(20) + '\nThe grammar pass added port 8080 here.\n')
+        self.run_step()
+        self.write(paragraphs(20) + '\nThe grammar pass added a port here.\n')
+        self.assertIn('  8080', self.run_step()[1])
+
+    def test_distilling_the_agents_text_settles_what_it_owed(self):
+        self.distill_fresh()
+        stamped = self.doc.read_text()
+        pending.before_edit('s1', self.doc)
+        self.write(stamped + '\n' + paragraphs(6, tag='a'))
+        pending.after_edit('s1', self.doc)
+        self.assertEqual(sum(pending.owed(self.doc).values()), 60)
+
+        self.run_step('agent')
+        shorter = paragraphs(6, tag='a').replace('juliet\n', '\n', 2)  # grammar: 58
+        for addition in (shorter, paragraphs(5, tag='a'), paragraphs(3, tag='a')):
+            self.write(stamped + '\n' + addition)
+            self.run_step()
+        self.assertTrue(self.run_step('reviewed')[0])
+        self.assertEqual(pending.owed(self.doc), {})
+
     def test_a_pass_that_drops_an_anchor_is_refused(self):
         self.write(paragraphs(19) + '\nThe server listens on port 3000 by default here.\n')
         self.run_step()
