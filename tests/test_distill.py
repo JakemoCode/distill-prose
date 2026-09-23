@@ -39,9 +39,13 @@ class Session(unittest.TestCase):
         self.store = tempfile.TemporaryDirectory()
         self.saved_store = pending.STORE
         pending.STORE = Path(self.store.name)
+        # Tests run from a terminal sometimes. The agent's shell never is one.
+        self.saved_terminal = getattr(distill, 'human_at_terminal', None)
+        distill.human_at_terminal = lambda: False
 
     def tearDown(self):
         pending.STORE = self.saved_store
+        distill.human_at_terminal = self.saved_terminal
         self.tmp.cleanup()
         self.store.cleanup()
 
@@ -210,21 +214,63 @@ class Session(unittest.TestCase):
             result = self.run_step(preset=preset if n == 0 else None)
         return result
 
-    def test_fluff_passes_that_stop_paying_off_above_the_ceiling_stall(self):
-        done, lines = self.curve(200, 195, 190, 182, 175, 168)
+    def test_five_fluff_passes_that_each_cut_under_five_percent_stall(self):
+        done, lines = self.curve(200, 195, 190, 182, 175, 168, 162, 156)
         self.assertFalse(done)
         self.assertIn('STALLED', text_of((done, lines)))
-        self.assertNotIn('Pass 6', text_of((done, lines)))
-        self.assertRegex(text_of((done, lines)), r'accept [0-9a-f]{6}')  # what the user types to accept it
 
-    def test_grammar_and_shape_passes_do_not_count_toward_a_stall(self):
-        self.assertNotIn('STALLED', text_of(self.curve(200, 195, 190, 186)))
+    def test_four_fruitless_passes_do_not_stall(self):
+        self.assertNotIn('STALLED', text_of(self.curve(200, 195, 190, 182, 175, 168, 162)))
 
-    def test_the_user_can_pick_a_gentler_preset_for_a_stalled_doc(self):
-        stall = text_of(self.curve(200, 195, 190, 182, 175, 168))
-        self.assertNotIn('Next: a blind review', text_of(self.run_step(preset='relaxed')))
-        self.user_types(stall, 'relaxed')
-        self.assertIn('Next: a blind review', text_of(self.run_step(preset='relaxed')))
+    def test_a_real_cut_resets_the_count(self):
+        for count in (200, 195, 190, 182, 175, 150, 145, 140, 136):
+            self.write(prose_words(count))
+            self.assertNotIn('STALLED', text_of(self.run_step()), count)
+
+    def test_refused_attempts_count_toward_a_stall(self):
+        self.write(prose_words(200))
+        self.run_step()
+        for _ in range(5):
+            self.write(prose_words(100))  # a grammar pass that cuts, refused every time
+            result = text_of(self.run_step())
+        self.assertIn('STALLED', result)
+
+    def test_a_stall_ends_the_session_and_releases_the_agent_without_a_stamp(self):
+        self.distill_fresh()
+        stamp = prose.read_stamp(self.doc.read_text())
+        pending.before_edit('s1', self.doc)
+        self.write(self.doc.read_text() + '\n' + prose_words(200))
+        pending.after_edit('s1', self.doc)
+        stamped = self.doc.read_text().rsplit('\n' + prose_words(200), 1)[0]
+        self.run_step('agent')
+        for _ in range(5):
+            self.write(stamped + '\n' + prose_words(100))  # a grammar pass that cuts, refused every time
+            result = text_of(self.run_step())
+        self.assertIn('STALLED', result)
+        self.assertNotRegex(result, r'accept [0-9a-f]{6}')  # no password needed to get out
+        self.assertEqual(prose.read_stamp(self.doc.read_text()), stamp)
+        self.assertFalse((self.dir / '.distill').exists())
+        self.assertEqual(pending.owed(self.doc), {})
+
+    def test_the_user_can_accept_a_stalled_doc_as_it_stands(self):
+        self.curve(200, 195, 190, 182, 175, 168, 162, 156)
+        asked = text_of(self.run_step('stop'))  # the stall ended the session; this starts one
+        self.user_types(asked, 'accept')
+        self.assertIn('Next: a blind review', text_of(self.run_step('stop')))
+        self.assertTrue(self.run_step('reviewed')[0])
+        self.assertTrue(prose.read_stamp(self.doc.read_text())['stopped'])
+
+    def test_the_cli_exits_3_on_a_stall(self):
+        self.write(prose_words(200))
+        self.run_step()
+        for _ in range(4):
+            self.write(prose_words(100))
+            self.run_step()
+        script = ROOT / 'skills' / 'distill' / 'scripts' / 'distill.py'
+        env = {**os.environ, 'TMPDIR': self.store.name}
+        run = subprocess.run([sys.executable, str(script), str(self.doc)], capture_output=True,
+                             text=True, env=env, stdin=subprocess.DEVNULL)
+        self.assertEqual(run.returncode, 3, run.stdout)
 
     def test_the_skill_never_offers_the_agent_dictation(self):
         skill = (ROOT / 'skills' / 'distill' / 'SKILL.md').read_text()
@@ -260,7 +306,26 @@ class Session(unittest.TestCase):
         skill = (ROOT / 'skills' / 'distill' / 'SKILL.md').read_text()
         self.assertNotIn('--stop', skill)
 
-    def test_a_preset_is_used_and_recorded(self):
+    def test_a_preset_the_user_named_is_used_and_recorded(self):
+        pending.record_prompt('s1', 'Distill guide.md, moderate please.')
+        self.write(paragraphs(20))
+        self.assertIn('(moderate) at 120', text_of(self.run_step(preset='moderate')))
+
+    def test_a_preset_the_user_never_named_is_refused(self):
+        pending.record_prompt('s1', 'Distill guide.md.')
+        self.write(paragraphs(20))
+        refused = text_of(self.run_step(preset='relaxed'))
+        self.assertNotIn('(relaxed)', refused)
+        self.assertIn('Only the user picks a preset', refused)
+
+    def test_a_preset_change_partway_through_needs_the_word_too(self):
+        self.curve(200, 195)
+        self.assertIn('Only the user picks a preset', text_of(self.run_step(preset='relaxed')))
+        pending.record_prompt('s1', 'go with relaxed')
+        self.assertIn('(relaxed)', text_of(self.run_step(preset='relaxed')))
+
+    def test_a_person_at_a_terminal_needs_no_evidence(self):
+        distill.human_at_terminal = lambda: True
         self.write(paragraphs(20))
         self.assertIn('(moderate) at 120', text_of(self.run_step(preset='moderate')))
 

@@ -15,6 +15,7 @@ instruction. Exit 0 means DONE and nothing else does.
 import argparse
 import json
 import os
+import re
 import secrets
 import shutil
 import subprocess
@@ -29,7 +30,7 @@ SCRATCH = '.distill'
 SIDECAR = '.distill.json'
 GRAMMAR_FLOOR = 0.90  # a grammar pass keeps at least this share of the count
 SHAPE_FLOOR = 0.70  # a shape pass reorganizes; it removes connective words at most
-STALL_PASSES = 3  # fluff passes in a row, each under the weak-pass share, that mean the text resists cutting
+STALL_ATTEMPTS = 5  # attempts in a row that were refused or cut under the weak-pass share
 RESTORE_ALLOWANCE = 0.10  # how far restorations after the review may raise the count
 
 SCRIPT = Path(__file__).resolve()
@@ -183,11 +184,20 @@ def exits(peak, preset):
             f'removing under {int(prose.WEAK_PASS_RATIO * 100)}%, ending at {int(peak * ceiling)} or fewer.')
 
 
-def stalled(curve):
-    """True when the fluff passes have stopped paying off: grammar and shape are passes 1 and 2."""
-    removals = [(start - end) / start for start, end in zip(curve, curve[1:]) if start]
-    return len(removals) >= 2 + STALL_PASSES and all(
-        share < prose.WEAK_PASS_RATIO for share in removals[-STALL_PASSES:])
+def human_at_terminal():
+    """A person running the script by hand. An agent's shell has no terminal on stdin."""
+    return os.isatty(0)
+
+
+def user_named(word):
+    """True when the user typed this word this session, or is running the script by hand."""
+    pattern = re.compile(rf'\b{re.escape(word)}\b', re.IGNORECASE)
+    return human_at_terminal() or any(pattern.search(prompt) for prompt in pending.all_prompts())
+
+
+def preset_refusal(preset):
+    return [f'Only the user picks a preset. Ask them which one they want. The script accepts {preset} '
+            f'once they have typed the word "{preset}".', 'Nothing was recorded.']
 
 
 def phrase(state, word):
@@ -207,22 +217,42 @@ def ask_user(doc, state, word, flag, what):
             'Nothing was recorded.']
 
 
-def stall_report(doc, curve, state):
-    preset = state['preset']
-    target, ceiling = prose.PRESETS[preset]
-    gentler = [name for name, (t, _) in prose.PRESETS.items() if t > target]
-    options = [f'  - a gentler preset: the user replies `{phrase(state, name)}`, then you run: '
-               f'{run_line(doc, "--preset " + name)}' for name in gentler]
+def close(folder):
+    """Remove a finished session's scratch, and the scratch folder once no session is left in it."""
+    shutil.rmtree(folder)
+    scratch = folder.parent
+    if all(entry.name == '.gitignore' for entry in scratch.iterdir()):
+        shutil.rmtree(scratch)
+
+
+def stall(doc, folder, state):
+    """End a session that has stopped getting anywhere, and release the agent from it.
+
+    Nothing is stamped: text that never got cut stays new since the stamp, so the
+    user can ask for it again with a gentler preset.
+    """
+    curve = prose.curve_of(state['points'])
+    target = prose.PRESETS[state['preset']][0]
+    gentler = [name for name, (share, _) in prose.PRESETS.items() if share > target]
+    pending.settle(doc)
+    close(folder)
     return [
-        f'STALLED at {curve[-1] / curve[0] * 100:.0f}% of the peak. The last {STALL_PASSES} passes each cut '
-        f'under {int(prose.WEAK_PASS_RATIO * 100)}%, and {preset} needs {int(curve[0] * target)} or fewer '
-        f'({int(curve[0] * ceiling)} to converge). This text resists cutting.',
-        'Make no more passes. Tell the user the curve and these options, then end your turn:',
-        *options,
-        f'  - accept it as it stands: the user replies `{phrase(state, "accept")}`, then you run: '
-        f'{run_line(doc, "--stop")}',
-        'Both choices are the user\'s. The script checks for the reply in what the user typed.',
+        f'STALLED: {STALL_ATTEMPTS} attempts in a row made no progress. Each was refused or cut under '
+        f'{int(prose.WEAK_PASS_RATIO * 100)}%. Curve: {" -> ".join(map(str, curve))} prose words. '
+        f'This text resists cutting at {state["preset"]}.',
+        'The session is over. Nothing was stamped, and you owe nothing more on this doc.',
+        'Tell the user the curve and end your turn. They can ask for a gentler preset'
+        + (f' ({" or ".join(gentler)})' if gentler else '') + ', or to accept the text as it stands.',
     ]
+
+
+def no_progress(doc, folder, root, state, lines):
+    """Count an attempt that got nowhere. Enough of them in a row end the session."""
+    state['fruitless'] = state.get('fruitless', 0) + 1
+    if state['fruitless'] >= STALL_ATTEMPTS:
+        return False, lines + stall(doc, folder, state)
+    save_state(folder, root, state)
+    return False, lines
 
 
 def run_line(doc, flag=''):
@@ -245,6 +275,8 @@ def save_state(folder, root, state):
 
 
 def start(doc, text, preset, agent_only):
+    if preset and preset != prose.DEFAULT_PRESET and not user_named(preset):
+        return False, preset_refusal(preset)
     folder, root = session_dir(doc)
     repo = repo_root(doc)
     tracked = is_tracked(repo, doc)
@@ -336,10 +368,7 @@ def finish(doc, text, state, folder, curve, reason):
         tail = f'Recorded it in {doc.parent / SIDECAR}.'
 
     pending.settle(doc)
-    shutil.rmtree(folder)
-    scratch = folder.parent
-    if all(entry.name == '.gitignore' for entry in scratch.iterdir()):
-        shutil.rmtree(scratch)  # no other doc is mid-session here
+    close(folder)
     percent = f'{curve[-1] / curve[0] * 100:.1f}%'
     return [f'DONE. {doc.name} distilled ({reason}): {"->".join(map(str, curve))} ({percent}). {tail}',
             f'Stamp: {stamp_line}']
@@ -367,23 +396,29 @@ def step(doc, flag=None, preset=None):
                        'Close it, then run this again. Nothing was recorded.']
 
     if state is None:
-        return start(doc, text, preset, flag == 'agent')
+        done, lines = start(doc, text, preset, flag == 'agent')
+        state = load_state(folder)
+        # A stop can come after a stall ended the session. It starts a new one
+        # and still needs the user's phrase.
+        if flag != 'stop' or state is None:
+            return done, lines
 
     current = prose.block_list(prose.body(text))
     lines = []
 
     lost_old = [h for h in state['protected'] if h not in {b[0] for b in current}]
     if lost_old:
-        return False, [f'This pass changed {len(lost_old)} block(s) of text that was already distilled. '
+        return no_progress(doc, folder, root, state, [f'This pass changed {len(lost_old)} block(s) of text that was already distilled. '
                        'Only the new text is being distilled.',
                        f'Put the old text back (`{run_line(doc, "--undo")}` restores the last recorded version), '
-                       'then run this again. Nothing was recorded.']
+                       'then run this again. Nothing was recorded.'])
 
     missing = prose.missing_anchors(state['anchors'], prose.body(text))
     if missing:
-        return False, ['These are gone from the doc, and every one of them has to survive:',
-                       *[f'  {anchor}' for anchor in missing],
-                       f'Put them back (or `{run_line(doc, "--undo")}`), then run this again. Nothing was recorded.']
+        return no_progress(doc, folder, root, state, [
+            'These are gone from the doc, and every one of them has to survive:',
+            *[f'  {anchor}' for anchor in missing],
+            f'Put them back (or `{run_line(doc, "--undo")}`), then run this again. Nothing was recorded.'])
 
     count = prose.billed(state['reference'], current)
     points = state['points']
@@ -394,26 +429,31 @@ def step(doc, flag=None, preset=None):
         return False, ask_user(doc, state, 'accept', '--stop', f'stop a distillation and accept {doc.name} as it stands')
 
     if preset and preset != state['preset']:
-        if not user_said(state, preset):
-            save_state(folder, root, state)
-            return False, ask_user(doc, state, preset, f'--preset {preset}', 'change the preset')
+        if not user_named(preset):
+            return False, preset_refusal(preset)
         state['preset'] = preset
 
     asked = state.get('review_asked_at')
     if asked is not None and count > asked * (1 + RESTORE_ALLOWANCE):
-        return False, [f'Restoring took the doc from {asked} to {count} prose words, more than '
+        return no_progress(doc, folder, root, state, [f'Restoring took the doc from {asked} to {count} prose words, more than '
                        f'{int(RESTORE_ALLOWANCE * 100)}% above the reviewed version. Restore only what a reader '
-                       'cannot act correctly without, then run this again. Nothing was recorded.']
+                       'cannot act correctly without, then run this again. Nothing was recorded.'])
 
     if count != points[-1]:
         if passes == 0 and count < points[0] * GRAMMAR_FLOOR:
-            return False, [f'Pass 1 removed {(1 - count / points[0]) * 100:.0f}% of the prose. The grammar pass '
+            return no_progress(doc, folder, root, state, [f'Pass 1 removed {(1 - count / points[0]) * 100:.0f}% of the prose. The grammar pass '
                            'changes grammar only; cutting comes later, once the grammar shows what is empty.',
-                           f'Run `{run_line(doc, "--undo")}` and redo pass 1. Nothing was recorded.']
+                           f'Run `{run_line(doc, "--undo")}` and redo pass 1. Nothing was recorded.'])
         if passes == 1 and count < points[-1] * SHAPE_FLOOR:
-            return False, [f'Pass 2 removed {(1 - count / points[-1]) * 100:.0f}%. The shape pass reorganizes '
+            return no_progress(doc, folder, root, state, [f'Pass 2 removed {(1 - count / points[-1]) * 100:.0f}%. The shape pass reorganizes '
                            'into a procedure, table or list; it does not cut.',
-                           f'Run `{run_line(doc, "--undo")}` and redo pass 2. Nothing was recorded.']
+                           f'Run `{run_line(doc, "--undo")}` and redo pass 2. Nothing was recorded.'])
+        # Grammar and shape passes are not meant to cut, so any valid one is
+        # progress. After them, progress is a new low by the weak-pass share.
+        if passes < 2 or count <= min(points) * (1 - prose.WEAK_PASS_RATIO):
+            state['fruitless'] = 0
+        else:
+            state['fruitless'] = state.get('fruitless', 0) + 1
         points.append(count)
         (folder / 'last.md').write_text(text)
         if count > max(points[:-1]):
@@ -443,10 +483,8 @@ def step(doc, flag=None, preset=None):
                      'comments. Distillation removes words; it does not move them. Cut them unless they are a real example.')
 
     if not passed:
-        if stalled(curve):
-            lines += stall_report(doc, curve, state)
-            save_state(folder, root, state)
-            return False, lines
+        if state.get('fruitless', 0) >= STALL_ATTEMPTS:
+            return False, lines + stall(doc, folder, state)
         save_state(folder, root, state)
         lines += [exits(curve[0], state['preset']), phase_instruction(passes + 1, bool(state['reference'])),
                   f'Then run: {run_line(doc)}']
@@ -495,7 +533,8 @@ def main():
                  if getattr(args, name)), None)
     done, lines = step(doc, flag, args.preset)
     print('\n'.join(lines))
-    sys.exit(0 if done else 1)
+    stalled = any(line.startswith('STALLED') for line in lines)
+    sys.exit(0 if done else 3 if stalled else 1)
 
 
 if __name__ == '__main__':

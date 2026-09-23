@@ -38,11 +38,11 @@ The script refuses a pass that breaks the method, and says why:
 | moderate | 60% | 75% |
 | relaxed | 70% | 85% |
 
-You pick the preset. For CLAUDE.md, AGENTS.md or a skill, Claude will suggest moderate and ask. The preset is saved in the doc's stamp.
+You pick the preset by naming it: "distill AGENTS.md, moderate". Claude may suggest one for CLAUDE.md, AGENTS.md or a skill, but the script only accepts a preset once you've typed its name. The preset is saved in the doc's stamp.
 
 ### When the text won't cut
 
-Some text is all steps and commands, and it can't reach the target. After 3 fluff passes in a row that each cut under 5%, the script reports `STALLED` and Claude stops and shows you the curve. You can pick a gentler preset, or accept it as it stands. Either way, you reply with the short phrase Claude shows you, such as `accept 3f9a2c`. The script checks for that phrase in what you typed, so Claude can't make the decision for you. The same goes for stopping partway through. The stamp then says `stopped`.
+Some text is all steps and commands, and it can't reach the target. After 5 attempts in a row that get nowhere, whether refused or cutting under 5%, the script reports `STALLED`, ends the run, and Claude shows you the curve. Nothing gets stamped, and Claude can move on. Later you can ask for it again with a gentler preset, or accept it as it stands. To accept, you reply with a short phrase Claude shows you, such as `accept 3f9a2c`. The script checks for it in what you typed, so Claude can't accept for you. The stamp then says `stopped`.
 
 Text you dictate ("add exactly this: …") isn't billed. The hooks match it against what you typed, so you don't have to say anything.
 
