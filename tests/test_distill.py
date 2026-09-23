@@ -79,7 +79,14 @@ class Session(unittest.TestCase):
         self.assertEqual((stamp['preset'], stamp['curve']), ('aggressive', [200, 90]))
         entry = json.loads((self.dir / '.distill.json').read_text())[stamp['id']]
         self.assertEqual(entry['path'], 'guide.md')
-        self.assertFalse((self.dir / '.distill' / 'guide.md').exists())
+        self.assertFalse((self.dir / '.distill').exists())
+
+    def test_finishing_one_doc_keeps_the_scratch_of_another_doc_in_progress(self):
+        other = self.dir / 'other.md'
+        other.write_text(paragraphs(20, tag='o'))
+        distill.step(other)
+        self.distill_fresh()
+        self.assertTrue((self.dir / '.distill' / 'other.md' / 'state.json').exists())
 
     def test_a_grammar_pass_that_cuts_is_refused_and_undo_restores_the_doc(self):
         self.write(paragraphs(20))

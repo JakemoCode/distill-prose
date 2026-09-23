@@ -294,6 +294,9 @@ def finish(doc, text, state, folder, curve, reason):
 
     pending.settle(doc)
     shutil.rmtree(folder)
+    scratch = folder.parent
+    if all(entry.name == '.gitignore' for entry in scratch.iterdir()):
+        shutil.rmtree(scratch)  # no other doc is mid-session here
     percent = f'{curve[-1] / curve[0] * 100:.1f}%'
     return [f'DONE. {doc.name} distilled ({reason}): {"->".join(map(str, curve))} ({percent}). {tail}',
             f'Stamp: {stamp_line}']
