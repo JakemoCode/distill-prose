@@ -82,6 +82,18 @@ class Hooks(unittest.TestCase):
         cli('--reset')
         self.assertIsNone(self.hook('stop', stop_hook_active=False))
 
+    def test_a_stop_during_an_agent_distillation_is_reported_to_the_user(self):
+        script = ROOT / 'skills' / 'distill' / 'scripts' / 'distill.py'
+        cli = lambda *a: subprocess.run([sys.executable, str(script), str(self.doc), *a],
+                                        capture_output=True, text=True, env=self.env)
+        cli()  # trusts the stamp and starts its sidecar entry
+        self.agent_appends('\n' + paragraphs(6, tag='a'))
+        cli('--agent')
+        cli('--stop')
+        self.assertEqual(cli('--reviewed').returncode, 0)
+        answer = self.hook('stop', stop_hook_active=False)
+        self.assertIn('stopped early', answer['systemMessage'])
+
     def test_an_unstamped_doc_is_not_watched(self):
         other = self.dir / 'notes.md'
         other.write_text(paragraphs(3))

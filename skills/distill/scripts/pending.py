@@ -114,6 +114,24 @@ def mark_dictated(doc):
     return total
 
 
+def note(doc, message):
+    """Leave a message for the user in every session that owed text on this doc."""
+    for path in _sessions():
+        data = json.loads(path.read_text())
+        if str(doc) in data['docs']:
+            data.setdefault('notes', []).append(message)
+            path.write_text(json.dumps(data))
+
+
+def take_notes(session_id):
+    """The session's messages for the user, cleared once read."""
+    data = _load(session_id)
+    notes = data.pop('notes', [])
+    if notes:
+        _save(session_id, data)
+    return notes
+
+
 def settle(doc):
     """Forget what every session owed on a doc once it has been distilled."""
     for path in _sessions():

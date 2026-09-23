@@ -20,6 +20,12 @@ def paragraphs(n, tag='p'):
     return '\n\n'.join(' '.join(f'{w}{tag}{i}' if j == 0 else w for j, w in enumerate(WORDS)) for i in range(n)) + '\n'
 
 
+def prose_words(n):
+    """A doc of exactly n prose words, in ten-word paragraphs."""
+    words = [f'{WORDS[i % 10]}w{i}' for i in range(n)]
+    return '\n\n'.join(' '.join(words[i:i + 10]) for i in range(0, n, 10)) + '\n'
+
+
 def text_of(result):
     return '\n'.join(result[1])
 
@@ -178,6 +184,42 @@ class Session(unittest.TestCase):
         self.assertIn('Next: a blind review', text_of(self.run_step('stop')))
         self.assertTrue(self.run_step('reviewed')[0])
         self.assertTrue(prose.read_stamp(self.doc.read_text())['stopped'])
+
+    def curve(self, *counts, preset=None):
+        """Record a curve of word counts, returning the last result."""
+        result = None
+        for n, count in enumerate(counts):
+            self.write(prose_words(count))
+            result = self.run_step(preset=preset if n == 0 else None)
+        return result
+
+    def test_fluff_passes_that_stop_paying_off_above_the_ceiling_stall(self):
+        done, lines = self.curve(200, 195, 190, 182, 175, 168)
+        self.assertFalse(done)
+        self.assertIn('STALLED', text_of((done, lines)))
+        self.assertNotIn('Pass 6', text_of((done, lines)))
+        self.assertIn('! python3', text_of((done, lines)))  # the user's own way to accept it
+
+    def test_grammar_and_shape_passes_do_not_count_toward_a_stall(self):
+        self.assertNotIn('STALLED', text_of(self.curve(200, 195, 190, 186)))
+
+    def test_the_user_can_pick_a_gentler_preset_for_a_stalled_doc(self):
+        self.curve(200, 195, 190, 182, 175, 168)
+        self.assertIn('Next: a blind review', text_of(self.run_step(preset='relaxed')))
+
+    def test_the_review_question_asks_what_a_reader_cannot_act_without(self):
+        self.assertIn('cannot act correctly without', text_of(self.curve(200, 195, 190, 90)))
+
+    def test_restoring_more_than_a_tenth_after_the_review_is_refused(self):
+        self.curve(200, 195, 190, 90)
+        self.write(prose_words(110))
+        self.assertIn('Restoring', text_of(self.run_step('reviewed')))
+        self.write(prose_words(95))
+        self.assertTrue(self.run_step('reviewed')[0])
+
+    def test_the_skill_never_offers_the_agent_a_stop(self):
+        skill = (ROOT / 'skills' / 'distill' / 'SKILL.md').read_text()
+        self.assertNotIn('--stop', skill)
 
     def test_a_preset_is_used_and_recorded(self):
         self.write(paragraphs(20))

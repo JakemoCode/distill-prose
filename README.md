@@ -40,10 +40,11 @@ The script refuses a pass that breaks the method, and says why:
 
 You pick the preset. For CLAUDE.md, AGENTS.md or a skill, Claude will suggest moderate and ask. The preset is saved in the doc's stamp.
 
-### Things only you can say
+### When the text won't cut
 
-- "Stop here." Claude ends the distillation early, and the stamp says `stopped`.
-- "Those were my words." Text Claude wrote for you word for word isn't billed.
+Some text is all steps and commands, and it can't reach the target. After 3 fluff passes in a row that each cut under 5%, the script reports `STALLED` and Claude stops and shows you the curve. You can pick a gentler preset, or accept it as it stands by running the `--stop` command it gives you with `!`. The stamp then says `stopped`. Claude is never told how to stop on its own. If a stop happens anyway during a distillation the hooks forced, you get a message about it.
+
+"Those were my words" tells Claude that text it wrote for you, word for word, isn't billed.
 
 ### What it writes
 

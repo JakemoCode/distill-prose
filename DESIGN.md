@@ -21,13 +21,15 @@ Decisions from the design grilling on 2026-09-23, with the reason for each. Chan
 | relaxed | 70% | 85% |
 
 - The user picks the preset, and it is stored in the stamp. The agent may suggest one and never picks it. A preset the agent can choose becomes the easy way out.
-- The user can stop a distillation early. The stamp records `stopped`.
+- When 3 fluff passes in a row each cut under 5% and the doc is still above the ceiling, the script reports `STALLED` and asks for no more passes. The agent reports the curve and the options, then ends its turn. The user picks a gentler preset or accepts the doc as it stands. Before this exit existed, a Haiku run looped for 18 passes and then faked the user's stop.
+- Only the user stops a distillation early. The skill never mentions `--stop`. The stall report tells the user to run it with `!`. The stamp records `stopped`. A stop inside an agent-triggered distillation is reported to the user by the Stop hook, because nothing can tell who ran the command.
 
 ## Passes
 
 - The script tracks phases: grammar (ASD-STE100), then shape, then fluff. It refuses a grammar pass that removes more than 10% and a shape pass that removes more than 30%. Order matters because the grammar pass exposes empty sentences before anything is cut.
 - After every pass the script checks anchors: code, identifiers, all-caps emphasis, URLs, paths, versions and numbers taken from the peak. A missing anchor refuses the pass.
-- One blind subagent review at the end compares the peak with the result. It asks for facts, instructions, numbers, constraints, reasons for rules, examples and deliberate emphasis. `DONE` waits for `--reviewed`.
+- One blind subagent review at the end compares the peak with the result. It asks only for what a reader cannot act correctly without: facts, instructions, numbers and constraints, and the reasons, examples or emphasis a rule depends on. An earlier, wider question led Haiku to restore everything it had cut. `DONE` waits for `--reviewed`.
+- Restorations after the review may raise the count by at most 10%. More than that means the review flagged fluff.
 - There is no stored fact ledger, because it would restate the doc. Anchors cover exact facts on every pass, and the review covers the rest once.
 
 ## Living docs

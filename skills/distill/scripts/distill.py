@@ -30,6 +30,8 @@ SCRATCH = '.distill'
 SIDECAR = '.distill.json'
 GRAMMAR_FLOOR = 0.90  # a grammar pass keeps at least this share of the count
 SHAPE_FLOOR = 0.70  # a shape pass reorganizes; it removes connective words at most
+STALL_PASSES = 3  # fluff passes in a row, each under the weak-pass share, that mean the text resists cutting
+RESTORE_ALLOWANCE = 0.10  # how far restorations after the review may raise the count
 
 SCRIPT = Path(__file__).resolve()
 
@@ -182,6 +184,28 @@ def exits(peak, preset):
             f'removing under {int(prose.WEAK_PASS_RATIO * 100)}%, ending at {int(peak * ceiling)} or fewer.')
 
 
+def stalled(curve):
+    """True when the fluff passes have stopped paying off: grammar and shape are passes 1 and 2."""
+    removals = [(start - end) / start for start, end in zip(curve, curve[1:]) if start]
+    return len(removals) >= 2 + STALL_PASSES and all(
+        share < prose.WEAK_PASS_RATIO for share in removals[-STALL_PASSES:])
+
+
+def stall_report(doc, curve, preset):
+    target, ceiling = prose.PRESETS[preset]
+    gentler = [name for name, (t, _) in prose.PRESETS.items() if t > target]
+    options = [f'  - a gentler preset: {run_line(doc, "--preset " + name)}' for name in gentler]
+    return [
+        f'STALLED at {curve[-1] / curve[0] * 100:.0f}% of the peak. The last {STALL_PASSES} passes each cut '
+        f'under {int(prose.WEAK_PASS_RATIO * 100)}%, and {preset} needs {int(curve[0] * target)} or fewer '
+        f'({int(curve[0] * ceiling)} to converge). This text resists cutting.',
+        'Make no more passes. Tell the user the curve and these options, then end your turn:',
+        *options,
+        f'  - accept it as it stands: the user runs `! {run_line(doc, "--stop")}`',
+        'Both choices are the user\'s. Wait for one.',
+    ]
+
+
 def run_line(doc, flag=''):
     return f'python3 "{SCRIPT}" "{doc}"{" " + flag if flag else ""}'
 
@@ -292,6 +316,11 @@ def finish(doc, text, state, folder, curve, reason):
         save_sidecar(doc.parent, entries)
         tail = f'Recorded it in {doc.parent / SIDECAR}.'
 
+    if state['stopped'] and state['agent_only']:
+        # A stop is the user's call, and nothing here can tell who ran it. When
+        # it lands in a distillation the agent was made to do, the user hears.
+        pending.note(doc, f'{doc.name} was stopped early during an agent distillation, at '
+                          f'{curve[-1] / curve[0] * 100:.0f}% of its peak. Check that you asked for that.')
     pending.settle(doc)
     shutil.rmtree(folder)
     scratch = folder.parent
@@ -351,6 +380,15 @@ def step(doc, flag=None, preset=None):
     points = state['points']
     passes = len(points) - 1
 
+    if preset:
+        state['preset'] = preset  # only ever the user's choice
+
+    asked = state.get('review_asked_at')
+    if asked is not None and count > asked * (1 + RESTORE_ALLOWANCE):
+        return False, [f'Restoring took the doc from {asked} to {count} prose words, more than '
+                       f'{int(RESTORE_ALLOWANCE * 100)}% above the reviewed version. Restore only what a reader '
+                       'cannot act correctly without, then run this again. Nothing was recorded.']
+
     if count != points[-1]:
         if passes == 0 and count < points[0] * GRAMMAR_FLOOR:
             return False, [f'Pass 1 removed {(1 - count / points[0]) * 100:.0f}% of the prose. The grammar pass '
@@ -390,6 +428,8 @@ def step(doc, flag=None, preset=None):
 
     if not passed:
         save_state(folder, root, state)
+        if stalled(curve):
+            return False, lines + stall_report(doc, curve, state['preset'])
         lines += [exits(curve[0], state['preset']), phase_instruction(passes + 1, bool(state['reference'])),
                   f'Then run: {run_line(doc)}']
         return False, lines
@@ -399,15 +439,20 @@ def step(doc, flag=None, preset=None):
     save_state(folder, root, state)
 
     if state['reviewed_at'] != count:
+        if state.get('review_asked_at') is None:
+            state['review_asked_at'] = count
+            save_state(folder, root, state)
         lines += [
             f'Distilled ({reason}). Next: a blind review.',
             'Dispatch a subagent that has not seen your passes. Give it these two files, the question below, '
             'and nothing about why you cut what you cut:',
             f'  peak:    {folder / "peak.md"}',
             f'  current: {doc}',
-            '  "List every fact, instruction, number, constraint, reason for a rule, example, and piece of '
-            'deliberate emphasis in the peak that the current doc lacks."',
-            f'Restore each item a reader needs, then run: {run_line(doc, "--reviewed")}',
+            '  "What in the peak does a reader of the current doc need, and cannot act correctly without? '
+            'Facts, instructions, numbers and constraints, and the reasons, examples or emphasis a rule '
+            'depends on. List only those."',
+            f'Restore only those, at most {int(RESTORE_ALLOWANCE * 100)}% more words, then run: '
+            f'{run_line(doc, "--reviewed")}',
         ]
         return False, lines
 

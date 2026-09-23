@@ -45,20 +45,24 @@ def main():
             pending.after_edit(session, doc)
         return
 
+    notes = pending.take_notes(session)
     debts = [(doc, words) for doc, words in pending.session_debts(session)
              if words >= prose.FLOOR and not distill.session_active(doc)]
     if not debts:
+        if notes:
+            print(json.dumps({'systemMessage': 'distill-prose: ' + ' '.join(notes)}))
         return
     listing = ', '.join(f'{doc} ({words} words)' for doc, words in debts)
 
     # Blocking twice would trap a session that cannot distill: a refused
     # command, or no python3. Let it end, and say what is still owed.
     if data.get('stop_hook_active'):
-        print(json.dumps({'systemMessage': f'distill-prose: still undistilled: {listing}'}))
+        print(json.dumps({'systemMessage': ' '.join([f'distill-prose: still undistilled: {listing}.', *notes])}))
         return
 
     doc, words = debts[0]
     print(json.dumps({
+        **({'systemMessage': 'distill-prose: ' + ' '.join(notes)} if notes else {}),
         'decision': 'block',
         'reason': (
             f'You added {words} prose words to {doc}, a distilled doc. Distill your additions before you '
