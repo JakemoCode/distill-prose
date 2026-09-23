@@ -217,6 +217,22 @@ class Session(unittest.TestCase):
         self.write(prose_words(95))
         self.assertTrue(self.run_step('reviewed')[0])
 
+    def test_editing_a_code_block_the_agent_wrote_is_not_editing_old_text(self):
+        self.distill_fresh()
+        stamped = self.doc.read_text()
+        addition = '\n' + paragraphs(6, tag='a') + '\n```\nlsof -i :3000\n```\n'
+        pending.before_edit('s1', self.doc)
+        self.write(stamped + addition)
+        pending.after_edit('s1', self.doc)
+        self.run_step('agent')
+        self.write(stamped + addition.replace('lsof -i :3000', 'lsof -i :3000 -t').replace('juliet', 'kilo', 1))
+        self.assertNotIn('already distilled', text_of(self.run_step()))
+
+    def test_the_skill_names_its_base_directory_rather_than_a_shell_fallback(self):
+        skill = (ROOT / 'skills' / 'distill' / 'SKILL.md').read_text()
+        self.assertNotIn(':-.', skill)
+        self.assertIn('base directory', skill)
+
     def test_the_skill_never_offers_the_agent_a_stop(self):
         skill = (ROOT / 'skills' / 'distill' / 'SKILL.md').read_text()
         self.assertNotIn('--stop', skill)

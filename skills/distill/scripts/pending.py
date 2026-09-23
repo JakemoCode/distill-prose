@@ -66,8 +66,10 @@ def after_edit(session_id, doc):
             total = 0
         for digest, words in new[j1:j2]:
             share = min(words, total)
-            if share:
-                owed[digest] = owed.get(digest, 0) + share
+            # Every block the agent wrote is recorded, a code block with no prose
+            # words too. An unrecorded one would count as old, distilled text,
+            # and editing it would be refused.
+            owed[digest] = owed.get(digest, 0) + share
             total -= share
     _save(session_id, data)
 

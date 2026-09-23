@@ -5,10 +5,10 @@ description: Distill a markdown doc in measured passes until its prose halves or
 
 # Distill
 
-Script paths are relative to this skill's directory. In Claude Code, `${CLAUDE_SKILL_DIR}` is that directory.
+The script lives in this skill's base directory, the path you were given when the skill loaded:
 
 ```sh
-python3 "${CLAUDE_SKILL_DIR:-.}/scripts/distill.py" <doc>
+python3 "<base directory>/scripts/distill.py" <doc>
 ```
 
 **The script's output is your next instruction.** Run it before your first edit and after every pass, and do exactly what it prints. You are finished only when it prints `DONE` and exits 0. When a Stop hook says you owe a distillation, run the command the hook gives. When the script prints `STALLED`, the text resists cutting: make no more passes, tell the user the curve and the options it prints, and end your turn.
