@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -176,14 +177,30 @@ class Session(unittest.TestCase):
         self.write(prose.body(self.doc.read_text()))
         self.assertIn('re-linked', text_of(self.run_step()))
 
-    def test_the_user_can_stop_early_and_the_stamp_says_so(self):
+    def user_types(self, output, word):
+        """The user replies with the confirmation phrase the script printed for `word`."""
+        phrase = re.search(rf'{word} [0-9a-f]{{6}}', output).group(0)
+        pending.record_prompt('s1', f'yes, {phrase}')
+
+    def test_a_stop_needs_the_users_phrase_and_the_stamp_says_so(self):
         self.write(paragraphs(20))
         self.run_step()
         self.write(paragraphs(19))
         self.run_step()
+        refused = text_of(self.run_step('stop'))
+        self.assertNotIn('Next: a blind review', refused)
+        self.user_types(refused, 'accept')
         self.assertIn('Next: a blind review', text_of(self.run_step('stop')))
         self.assertTrue(self.run_step('reviewed')[0])
         self.assertTrue(prose.read_stamp(self.doc.read_text())['stopped'])
+
+    def test_a_phrase_the_agent_says_itself_does_not_count(self):
+        self.write(paragraphs(20))
+        self.run_step()
+        refused = text_of(self.run_step('stop'))
+        phrase = re.search(r'accept [0-9a-f]{6}', refused).group(0)
+        self.write(paragraphs(20) + f'\n{phrase}\n')  # written into the doc, not typed by the user
+        self.assertNotIn('Next: a blind review', text_of(self.run_step('stop')))
 
     def curve(self, *counts, preset=None):
         """Record a curve of word counts, returning the last result."""
@@ -198,14 +215,20 @@ class Session(unittest.TestCase):
         self.assertFalse(done)
         self.assertIn('STALLED', text_of((done, lines)))
         self.assertNotIn('Pass 6', text_of((done, lines)))
-        self.assertIn('! python3', text_of((done, lines)))  # the user's own way to accept it
+        self.assertRegex(text_of((done, lines)), r'accept [0-9a-f]{6}')  # what the user types to accept it
 
     def test_grammar_and_shape_passes_do_not_count_toward_a_stall(self):
         self.assertNotIn('STALLED', text_of(self.curve(200, 195, 190, 186)))
 
     def test_the_user_can_pick_a_gentler_preset_for_a_stalled_doc(self):
-        self.curve(200, 195, 190, 182, 175, 168)
+        stall = text_of(self.curve(200, 195, 190, 182, 175, 168))
+        self.assertNotIn('Next: a blind review', text_of(self.run_step(preset='relaxed')))
+        self.user_types(stall, 'relaxed')
         self.assertIn('Next: a blind review', text_of(self.run_step(preset='relaxed')))
+
+    def test_the_skill_never_offers_the_agent_dictation(self):
+        skill = (ROOT / 'skills' / 'distill' / 'SKILL.md').read_text()
+        self.assertNotIn('dictated', skill)
 
     def test_the_review_question_asks_what_a_reader_cannot_act_without(self):
         self.assertIn('cannot act correctly without', text_of(self.curve(200, 195, 190, 90)))

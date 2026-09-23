@@ -42,9 +42,9 @@ You pick the preset. For CLAUDE.md, AGENTS.md or a skill, Claude will suggest mo
 
 ### When the text won't cut
 
-Some text is all steps and commands, and it can't reach the target. After 3 fluff passes in a row that each cut under 5%, the script reports `STALLED` and Claude stops and shows you the curve. You can pick a gentler preset, or accept it as it stands by running the `--stop` command it gives you with `!`. The stamp then says `stopped`. Claude is never told how to stop on its own. If a stop happens anyway during a distillation the hooks forced, you get a message about it.
+Some text is all steps and commands, and it can't reach the target. After 3 fluff passes in a row that each cut under 5%, the script reports `STALLED` and Claude stops and shows you the curve. You can pick a gentler preset, or accept it as it stands. Either way, you reply with the short phrase Claude shows you, such as `accept 3f9a2c`. The script checks for that phrase in what you typed, so Claude can't make the decision for you. The same goes for stopping partway through. The stamp then says `stopped`.
 
-"Those were my words" tells Claude that text it wrote for you, word for word, isn't billed.
+Text you dictate ("add exactly this: …") isn't billed. The hooks match it against what you typed, so you don't have to say anything.
 
 ### What it writes
 
@@ -65,7 +65,7 @@ A stamped doc is billed only for new text. The doc is split into blocks (paragra
 
 Anchors are the exact-match facts in the peak draft: code, identifiers, numbers, URLs, paths, versions and all-caps emphasis. Every pass is checked against them. The blind review at the end catches what exact matching can't, including lost reasons, examples and emphasis.
 
-The hooks diff a stamped doc's blocks around every Edit or Write, which records exactly what the agent added. The Stop hook blocks the end of a turn while the agent owes 50 or more words. It blocks once, so a session that can't distill isn't trapped.
+The hooks diff a stamped doc's blocks around every Edit or Write, which records exactly what the agent added. They also record what you type, so text you dictated ("add exactly this: …") counts as yours, even after a light copyedit. The Stop hook blocks the end of a turn while the agent owes 50 or more words. It blocks once, so a session that can't distill isn't trapped.
 
 In a repo that runs docs-distillation-gate, the skill hands the doc to the gate.
 

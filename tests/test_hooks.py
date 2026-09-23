@@ -1,4 +1,5 @@
 import json
+import re
 import os
 import subprocess
 import sys
@@ -82,17 +83,21 @@ class Hooks(unittest.TestCase):
         cli('--reset')
         self.assertIsNone(self.hook('stop', stop_hook_active=False))
 
-    def test_a_stop_during_an_agent_distillation_is_reported_to_the_user(self):
+    def cli(self, *args):
         script = ROOT / 'skills' / 'distill' / 'scripts' / 'distill.py'
-        cli = lambda *a: subprocess.run([sys.executable, str(script), str(self.doc), *a],
-                                        capture_output=True, text=True, env=self.env)
-        cli()  # trusts the stamp and starts its sidecar entry
+        return subprocess.run([sys.executable, str(script), str(self.doc), *args],
+                              capture_output=True, text=True, env=self.env)
+
+    def test_the_agent_cannot_stop_a_distillation_the_user_did_not_accept(self):
+        self.cli()  # trusts the stamp and starts its sidecar entry
         self.agent_appends('\n' + paragraphs(6, tag='a'))
-        cli('--agent')
-        cli('--stop')
-        self.assertEqual(cli('--reviewed').returncode, 0)
-        answer = self.hook('stop', stop_hook_active=False)
-        self.assertIn('stopped early', answer['systemMessage'])
+        self.cli('--agent')
+        refused = self.cli('--stop')
+        self.assertNotIn('blind review', refused.stdout)
+        phrase = re.search(r'accept [0-9a-f]{6}', refused.stdout).group(0)
+
+        self.hook('prompt', prompt=f'ok, {phrase}')
+        self.assertIn('blind review', self.cli('--stop').stdout)
 
     def test_an_unstamped_doc_is_not_watched(self):
         other = self.dir / 'notes.md'
@@ -100,16 +105,30 @@ class Hooks(unittest.TestCase):
         self.agent_appends('\n' + paragraphs(9, tag='a'), doc=other)
         self.assertIsNone(self.hook('stop', stop_hook_active=False))
 
-    def test_dictated_text_does_not_block(self):
-        self.agent_appends('\n' + paragraphs(6, tag='a'))
-        script = ROOT / 'skills' / 'distill' / 'scripts' / 'distill.py'
-        subprocess.run([sys.executable, str(script), str(self.doc), '--dictated'],
-                       capture_output=True, env=self.env)
+    def test_text_the_user_typed_is_not_billed(self):
+        dictated = paragraphs(6, tag='u')
+        self.hook('prompt', prompt=f'Add exactly this to AGENTS.md:\n\n{dictated}')
+        self.agent_appends('\n- ' + dictated.replace('\n\n', '\n- '))  # as a list, in backticks-free markdown
         self.assertIsNone(self.hook('stop', stop_hook_active=False))
+
+    def test_a_light_copyedit_of_dictated_text_still_counts_as_the_users(self):
+        dictated = paragraphs(6, tag='u')
+        self.hook('prompt', prompt=f'Add this: {dictated}')
+        self.agent_appends('\n' + dictated.replace('golf', 'gulf', 1))
+        self.assertIsNone(self.hook('stop', stop_hook_active=False))
+
+    def test_text_the_agent_wrote_from_a_request_is_billed(self):
+        self.hook('prompt', prompt='Add a troubleshooting section about the port being in use.')
+        self.agent_appends('\n' + paragraphs(6, tag='a'))
+        self.assertEqual(self.hook('stop', stop_hook_active=False)['decision'], 'block')
+
+    def test_the_stop_hook_never_offers_the_agent_a_way_out(self):
+        self.agent_appends('\n' + paragraphs(6, tag='a'))
+        self.assertNotIn('dictated', self.hook('stop', stop_hook_active=False)['reason'])
 
     def test_the_hook_config_points_at_this_script(self):
         config = json.loads((ROOT / 'hooks' / 'hooks.json').read_text())['hooks']
-        self.assertEqual(set(config), {'PreToolUse', 'PostToolUse', 'Stop'})
+        self.assertEqual(set(config), {'PreToolUse', 'PostToolUse', 'Stop', 'UserPromptSubmit'})
         for entries in config.values():
             self.assertIn('${CLAUDE_PLUGIN_ROOT}/hooks/edit.py', entries[0]['hooks'][0]['command'])
 

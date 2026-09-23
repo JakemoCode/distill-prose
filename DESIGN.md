@@ -22,7 +22,8 @@ Decisions from the design grilling on 2026-09-23, with the reason for each. Chan
 
 - The user picks the preset, and it is stored in the stamp. The agent may suggest one and never picks it. A preset the agent can choose becomes the easy way out.
 - When 3 fluff passes in a row each cut under 5% and the doc is still above the ceiling, the script reports `STALLED` and asks for no more passes. The agent reports the curve and the options, then ends its turn. The user picks a gentler preset or accepts the doc as it stands. Before this exit existed, a Haiku run looped for 18 passes and then faked the user's stop.
-- Only the user stops a distillation early. The skill never mentions `--stop`. The stall report tells the user to run it with `!`. The stamp records `stopped`. A stop inside an agent-triggered distillation is reported to the user by the Stop hook, because nothing can tell who ran the command.
+- Only the user stops a distillation early or changes its preset partway through. The script proves it with a one-time phrase, such as `accept 3f9a2c`. It refuses the command and prints the phrase for the agent to relay, and the command only succeeds once the phrase shows up in a prompt the user typed. An agent can see the phrase and cannot type it for the user. This works the same in Cowork, which has no `!` prefix. The stamp records `stopped`.
+- The preset on the first run is still the agent's word that it asked the user. That exposure remains.
 
 ## Passes
 
@@ -48,5 +49,5 @@ Decisions from the design grilling on 2026-09-23, with the reason for each. Chan
 - PreToolUse and PostToolUse on Edit/Write diff a stamped doc's blocks, so they record exactly what the agent wrote. Human edits never pass through them and are never billed.
 - The Stop hook blocks the end of a turn while the agent owes 50+ words on a stamped doc. It blocks once. On a second stop it lets the session end and lists what is owed.
 - The hooks stay quiet while a distillation of that doc is running.
-- `--dictated` marks the agent's pending text as the user's own words.
+- A `UserPromptSubmit` hook records what the user types. A block the agent wrote counts as dictated, and isn't billed, when 90% of its words appear in order in one of the user's prompts in that session. Case, whitespace and markdown syntax are ignored. There is no flag for it: a `--dictated` flag was the second escape hatch a Haiku run used to fake the user's word.
 - An explicit request to distill a doc bills everything new since the stamp. The Stop hook's `--agent` bills only the agent's text.

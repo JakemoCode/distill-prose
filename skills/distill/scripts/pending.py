@@ -1,18 +1,29 @@
-"""What an agent owes: text it wrote into a stamped doc and has not distilled.
+"""What an agent owes, and what the user said.
 
-The edit hooks record the owed text. The Stop hook refuses to end a turn over
-it, and distill.py settles it. It lives in per-session files in the system temp
-directory because the obligation belongs to the session that created it, never
-to the repo.
+The edit hooks record text an agent wrote into a stamped doc. The prompt hook
+records what the user typed. The Stop hook refuses to end a turn over owed
+text, and distill.py settles it.
+
+The user's own words are the one thing an agent cannot fabricate, so they are
+the evidence for every decision that belongs to the user: text the user
+dictated is not billed, and a stop or a gentler preset needs a phrase the user
+typed.
+
+Everything lives in per-session files in the system temp directory, because it
+belongs to the session that created it, never to the repo.
 """
 
+import difflib
 import json
+import re
 import tempfile
 from pathlib import Path
 
 import prose
 
 STORE = Path(tempfile.gettempdir()) / 'distill-prose'
+PROMPTS_KEPT = 50
+DICTATED_SHARE = 0.9  # of a block's words, in order, found in one prompt
 
 
 def _path(session_id):
@@ -33,10 +44,47 @@ def _sessions():
     return sorted(STORE.glob('*.json')) if STORE.exists() else []
 
 
+# What the user typed ----------------------------------------------------------
+
+def record_prompt(session_id, text):
+    data = _load(session_id)
+    data['prompts'] = (data.get('prompts', []) + [text])[-PROMPTS_KEPT:]
+    _save(session_id, data)
+
+
+def all_prompts():
+    prompts = []
+    for path in _sessions():
+        prompts.extend(json.loads(path.read_text()).get('prompts', []))
+    return prompts
+
+
+_WORD = re.compile(r'\w+')
+
+
+def dictated(text, prompts):
+    """True when the user typed this block: most of its words, in order, in one prompt.
+
+    Case, whitespace and markdown syntax are ignored, so the agent can set the
+    user's words as a list item or fix a word and they stay the user's.
+    """
+    words = _WORD.findall(text.lower())
+    if not words:
+        return False
+    for prompt in prompts:
+        said = _WORD.findall(prompt.lower())
+        matcher = difflib.SequenceMatcher(a=words, b=said, autojunk=False)
+        if sum(size for _, _, size in matcher.get_matching_blocks()) >= len(words) * DICTATED_SHARE:
+            return True
+    return False
+
+
+# What the agent wrote ---------------------------------------------------------
+
 def before_edit(session_id, doc):
     """Remember the doc's blocks just before an agent edits it."""
     data = _load(session_id)
-    entry = data['docs'].setdefault(str(doc), {'owed': {}, 'dictated': {}})
+    entry = data['docs'].setdefault(str(doc), {'owed': {}})
     entry['pre'] = prose.block_list(prose.body(doc.read_text()))
     _save(session_id, data)
 
@@ -74,64 +122,36 @@ def after_edit(session_id, doc):
     _save(session_id, data)
 
 
+def _agents_blocks(doc, entry, prompts):
+    """The owed blocks still in the doc, less the ones the user dictated."""
+    texts = {digest: text for digest, _, text in prose.blocks(prose.body(doc.read_text()))}
+    return {digest: words for digest, words in entry['owed'].items()
+            if digest in texts and not dictated(texts[digest], prompts)}
+
+
 def owed(doc):
-    """Owed words per block across every session, minus text marked as dictated."""
+    """Owed words per block across every session, less what each session's user dictated."""
     merged = {}
-    for path in _sessions():
-        entry = json.loads(path.read_text())['docs'].get(str(doc))
-        if entry:
-            for digest, words in entry['owed'].items():
-                merged[digest] = merged.get(digest, 0) + words
-    return merged
-
-
-def owed_words(entry, doc):
-    present = {b[0] for b in prose.block_list(prose.body(doc.read_text()))}
-    return sum(words for digest, words in entry['owed'].items() if digest in present)
-
-
-def session_debts(session_id):
-    """(doc, owed words) for each stamped doc this session still owes a distillation."""
-    debts = []
-    for name, entry in _load(session_id)['docs'].items():
-        doc = Path(name)
-        if doc.is_file():
-            words = owed_words(entry, doc)
-            if words:
-                debts.append((doc, words))
-    return debts
-
-
-def mark_dictated(doc):
-    """Move the agent's owed text in a doc to dictated: the user's own words."""
-    total = 0
     for path in _sessions():
         data = json.loads(path.read_text())
         entry = data['docs'].get(str(doc))
         if entry:
-            total += sum(entry['owed'].values())
-            entry['dictated'].update(entry['owed'])
-            entry['owed'] = {}
-            path.write_text(json.dumps(data))
-    return total
+            for digest, words in _agents_blocks(doc, entry, data.get('prompts', [])).items():
+                merged[digest] = merged.get(digest, 0) + words
+    return merged
 
 
-def note(doc, message):
-    """Leave a message for the user in every session that owed text on this doc."""
-    for path in _sessions():
-        data = json.loads(path.read_text())
-        if str(doc) in data['docs']:
-            data.setdefault('notes', []).append(message)
-            path.write_text(json.dumps(data))
-
-
-def take_notes(session_id):
-    """The session's messages for the user, cleared once read."""
+def session_debts(session_id):
+    """(doc, owed words) for each stamped doc this session still owes a distillation."""
     data = _load(session_id)
-    notes = data.pop('notes', [])
-    if notes:
-        _save(session_id, data)
-    return notes
+    debts = []
+    for name, entry in data['docs'].items():
+        doc = Path(name)
+        if doc.is_file():
+            words = sum(_agents_blocks(doc, entry, data.get('prompts', [])).values())
+            if words:
+                debts.append((doc, words))
+    return debts
 
 
 def settle(doc):

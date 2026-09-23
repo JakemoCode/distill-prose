@@ -6,10 +6,9 @@ instruction. Exit 0 means DONE and nothing else does.
 
   distill.py <doc> [--preset aggressive|moderate|relaxed]
   distill.py <doc> --reviewed   the blind review is done
-  distill.py <doc> --stop       the user ended the distillation early
+  distill.py <doc> --stop       the user replied with the accept phrase
   distill.py <doc> --undo       restore the last recorded version
   distill.py <doc> --agent      bill only text this agent wrote (the Stop hook's request)
-  distill.py <doc> --dictated   the agent's pending text is the user's own words
   distill.py <doc> --reset      forget the session
 """
 
@@ -191,18 +190,38 @@ def stalled(curve):
         share < prose.WEAK_PASS_RATIO for share in removals[-STALL_PASSES:])
 
 
-def stall_report(doc, curve, preset):
+def phrase(state, word):
+    """The reply that proves `word` is the user's decision: only the user can type it."""
+    state.setdefault('confirm', secrets.token_hex(3))
+    return f"{word} {state['confirm']}"
+
+
+def user_said(state, word):
+    wanted = phrase(state, word)
+    return any(wanted in prompt for prompt in pending.all_prompts())
+
+
+def ask_user(doc, state, word, flag, what):
+    return [f'Only the user can {what}. Ask them to reply with `{phrase(state, word)}` if they want that, '
+            f'then run: {run_line(doc, flag)}',
+            'Nothing was recorded.']
+
+
+def stall_report(doc, curve, state):
+    preset = state['preset']
     target, ceiling = prose.PRESETS[preset]
     gentler = [name for name, (t, _) in prose.PRESETS.items() if t > target]
-    options = [f'  - a gentler preset: {run_line(doc, "--preset " + name)}' for name in gentler]
+    options = [f'  - a gentler preset: the user replies `{phrase(state, name)}`, then you run: '
+               f'{run_line(doc, "--preset " + name)}' for name in gentler]
     return [
         f'STALLED at {curve[-1] / curve[0] * 100:.0f}% of the peak. The last {STALL_PASSES} passes each cut '
         f'under {int(prose.WEAK_PASS_RATIO * 100)}%, and {preset} needs {int(curve[0] * target)} or fewer '
         f'({int(curve[0] * ceiling)} to converge). This text resists cutting.',
         'Make no more passes. Tell the user the curve and these options, then end your turn:',
         *options,
-        f'  - accept it as it stands: the user runs `! {run_line(doc, "--stop")}`',
-        'Both choices are the user\'s. Wait for one.',
+        f'  - accept it as it stands: the user replies `{phrase(state, "accept")}`, then you run: '
+        f'{run_line(doc, "--stop")}',
+        'Both choices are the user\'s. The script checks for the reply in what the user typed.',
     ]
 
 
@@ -316,11 +335,6 @@ def finish(doc, text, state, folder, curve, reason):
         save_sidecar(doc.parent, entries)
         tail = f'Recorded it in {doc.parent / SIDECAR}.'
 
-    if state['stopped'] and state['agent_only']:
-        # A stop is the user's call, and nothing here can tell who ran it. When
-        # it lands in a distillation the agent was made to do, the user hears.
-        pending.note(doc, f'{doc.name} was stopped early during an agent distillation, at '
-                          f'{curve[-1] / curve[0] * 100:.0f}% of its peak. Check that you asked for that.')
     pending.settle(doc)
     shutil.rmtree(folder)
     scratch = folder.parent
@@ -340,11 +354,6 @@ def step(doc, flag=None, preset=None):
     if flag == 'reset':
         shutil.rmtree(folder, ignore_errors=True)
         return False, [f'Forgot the session for {doc.name}. Run this again to start over.']
-
-    if flag == 'dictated':
-        words = pending.mark_dictated(doc)
-        return False, [f'Marked {words} prose words in {doc.name} as the user\'s own words. '
-                       'The Stop hook no longer asks for them to be distilled.']
 
     if flag == 'undo':
         if state is None:
@@ -380,8 +389,15 @@ def step(doc, flag=None, preset=None):
     points = state['points']
     passes = len(points) - 1
 
-    if preset:
-        state['preset'] = preset  # only ever the user's choice
+    if flag == 'stop' and not user_said(state, 'accept'):
+        save_state(folder, root, state)
+        return False, ask_user(doc, state, 'accept', '--stop', f'stop a distillation and accept {doc.name} as it stands')
+
+    if preset and preset != state['preset']:
+        if not user_said(state, preset):
+            save_state(folder, root, state)
+            return False, ask_user(doc, state, preset, f'--preset {preset}', 'change the preset')
+        state['preset'] = preset
 
     asked = state.get('review_asked_at')
     if asked is not None and count > asked * (1 + RESTORE_ALLOWANCE):
@@ -427,9 +443,11 @@ def step(doc, flag=None, preset=None):
                      'comments. Distillation removes words; it does not move them. Cut them unless they are a real example.')
 
     if not passed:
-        save_state(folder, root, state)
         if stalled(curve):
-            return False, lines + stall_report(doc, curve, state['preset'])
+            lines += stall_report(doc, curve, state)
+            save_state(folder, root, state)
+            return False, lines
+        save_state(folder, root, state)
         lines += [exits(curve[0], state['preset']), phase_instruction(passes + 1, bool(state['reference'])),
                   f'Then run: {run_line(doc)}']
         return False, lines
@@ -464,7 +482,7 @@ def main():
     parser.add_argument('doc')
     parser.add_argument('--preset', choices=sorted(prose.PRESETS))
     group = parser.add_mutually_exclusive_group()
-    for name in ('reviewed', 'stop', 'undo', 'agent', 'dictated', 'reset'):
+    for name in ('reviewed', 'stop', 'undo', 'agent', 'reset'):
         group.add_argument(f'--{name}', action='store_true')
     args = parser.parse_args()
 
@@ -473,7 +491,7 @@ def main():
         print(f'distill: {args.doc} is not a file', file=sys.stderr)
         sys.exit(2)
 
-    flag = next((name for name in ('reviewed', 'stop', 'undo', 'agent', 'dictated', 'reset')
+    flag = next((name for name in ('reviewed', 'stop', 'undo', 'agent', 'reset')
                  if getattr(args, name)), None)
     done, lines = step(doc, flag, args.preset)
     print('\n'.join(lines))
