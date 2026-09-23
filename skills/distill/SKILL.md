@@ -11,7 +11,7 @@ The script lives in this skill's base directory, the path you were given when th
 python3 "<base directory>/scripts/distill.py" <doc>
 ```
 
-**The script's output is your next instruction.** Run it before your first edit and after every pass, and do exactly what it prints. You are finished only when it prints `DONE` and exits 0. When a Stop hook says you owe a distillation, run the command the hook gives. When the script prints `STALLED`, the text resists cutting: make no more passes, tell the user the curve and the options it prints, and end your turn.
+**The script's output is your next instruction.** Run it before your first edit and after every pass, and do exactly what it prints. You are finished only when it prints `DONE` and exits 0. When a Stop hook says you owe a distillation, run the command the hook gives. When the script prints `STALLED`, the session is over and you owe nothing more on the doc: tell the user the curve and end your turn. Some choices need the user's own words. The script says what it needs, and checks what the user typed.
 
 When `python3` is missing or the command is refused, stop and tell the user. distill-prose measures every pass, and an unmeasured distillation is what it exists to prevent.
 
@@ -25,5 +25,4 @@ When the script asks for one, dispatch a subagent with exactly the two files and
 
 ## Choices that belong to the user
 
-- **Preset.** `--preset aggressive|moderate|relaxed` sets how far the doc falls: 50% of its peak or converged at 65%, 60% or 75%, 70% or 85%. Aggressive is the default. For an instruction file such as CLAUDE.md, AGENTS.md or a skill, suggest moderate and ask. Pass `--preset` only with the user's answer.
-- **Dictated text.** Run `--dictated` only when the user supplied the words themselves.
+- **Preset.** `--preset aggressive|moderate|relaxed` sets how far the doc falls: 50% of its peak or converged at 65%, 60% or 75%, 70% or 85%. Aggressive is the default. For an instruction file such as CLAUDE.md, AGENTS.md or a skill, suggest moderate and ask. The script accepts a preset only once the user has typed its name.

@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""distill-prose hooks: mark what an agent writes into a stamped doc, and gate the Stop.
+"""distill-prose hooks: record what the user says and what an agent writes into a
+stamped doc, and gate the Stop.
 
-  edit.py pre    PreToolUse on Edit|Write
-  edit.py post   PostToolUse on Edit|Write
-  edit.py stop   Stop
+  edit.py prompt   UserPromptSubmit
+  edit.py pre      PreToolUse on Edit|Write
+  edit.py post     PostToolUse on Edit|Write
+  edit.py stop     Stop
 
 Only docs carrying a distill-prose stamp are watched. Human edits never pass
 through these hooks, so they are never billed.
@@ -34,6 +36,10 @@ def main():
     data = json.load(sys.stdin)
     session = data.get('session_id') or 'unknown'
 
+    if event == 'prompt':
+        pending.record_prompt(session, data.get('prompt') or '')
+        return
+
     if event in ('pre', 'post'):
         path = (data.get('tool_input') or {}).get('file_path')
         if not path:
@@ -45,29 +51,24 @@ def main():
             pending.after_edit(session, doc)
         return
 
-    notes = pending.take_notes(session)
     debts = [(doc, words) for doc, words in pending.session_debts(session)
              if words >= prose.FLOOR and not distill.session_active(doc)]
     if not debts:
-        if notes:
-            print(json.dumps({'systemMessage': 'distill-prose: ' + ' '.join(notes)}))
         return
     listing = ', '.join(f'{doc} ({words} words)' for doc, words in debts)
 
     # Blocking twice would trap a session that cannot distill: a refused
     # command, or no python3. Let it end, and say what is still owed.
     if data.get('stop_hook_active'):
-        print(json.dumps({'systemMessage': ' '.join([f'distill-prose: still undistilled: {listing}.', *notes])}))
+        print(json.dumps({'systemMessage': f'distill-prose: still undistilled: {listing}'}))
         return
 
     doc, words = debts[0]
     print(json.dumps({
-        **({'systemMessage': 'distill-prose: ' + ' '.join(notes)} if notes else {}),
         'decision': 'block',
         'reason': (
             f'You added {words} prose words to {doc}, a distilled doc. Distill your additions before you '
-            f'finish: run `{distill.run_line(doc, "--agent")}` and follow what it prints. If the user '
-            f'dictated that text word for word, run `{distill.run_line(doc, "--dictated")}` instead.'
+            f'finish: run `{distill.run_line(doc, "--agent")}` and follow what it prints.'
             + (f' Also owed: {listing}.' if len(debts) > 1 else '')
         ),
     }))
