@@ -5,7 +5,7 @@ Decisions from the design grilling on 2026-09-23, with the reason for each. Chan
 ## Scope
 
 - One doc at a time. The skill acts on the doc it is pointed at, and the hooks act only on docs that carry a distill-prose stamp.
-- Claude Code first. The plugin format also installs in Cowork. A smoke test there is still owed.
+- Claude Code first. The plugin format also installs in Cowork, which is untested. See [Next steps](#next-steps).
 - Python 3, standard library only. Anthropic's built-in skills run Python in Cowork, and nothing documents Node there.
 - When the script cannot run (no `python3`, or the command is refused), the skill stops. An unmeasured distillation is the failure this tool exists to prevent.
 
@@ -50,3 +50,26 @@ Decisions from the design grilling on 2026-09-23, with the reason for each. Chan
 - The hooks stay quiet while a distillation of that doc is running.
 - A `UserPromptSubmit` hook records what the user types. A block the agent wrote counts as dictated, and isn't billed, when 90% of its words appear in order in one of the user's prompts in that session. Case, whitespace and markdown syntax are ignored. There is no flag for it: a `--dictated` flag was the second escape hatch a Haiku run used to fake the user's word.
 - An explicit request to distill a doc bills everything new since the stamp. The Stop hook's `--agent` bills only the agent's text.
+
+## Next steps
+
+### Cowork smoke test
+
+Nobody has run the plugin in Cowork. Anthropic's docs say Cowork runs plugin skills, hooks and subagents, and runs commands in a Linux VM. They don't say whether `python3` is there or whether `UserPromptSubmit` hooks fire. The preset check, the accept phrase and dictation all depend on that hook.
+
+Setup:
+
+1. Install the plugin from Cowork's Customize tab, from GitHub (`JakemoCode/distill-prose`). If that isn't offered, upload a zip made with `git archive --format=zip --prefix=distill-prose/ -o distill-prose.zip main`.
+2. Copy `fixtures/smoke/setup.md` into an empty folder and connect that folder.
+3. Approve Python commands when asked.
+
+Run each test in a new chat:
+
+| Test | Type | Pass | Fail means |
+| --- | --- | --- | --- |
+| Script, path, prompt hook | `Distill setup.md, moderate.` | "Recorded setup.md: 539 prose words", with "(moderate)" | "Only the user picks a preset": the prompt hook isn't running. An error: no `python3`, or the path didn't resolve |
+| Full run | Let the first test continue | Passes, a blind-review subagent, then `DONE`. `setup.md` starts with a `distill-prose` stamp, `.distill.json` exists, and `.distill/` is gone | Note where it stopped and what it printed |
+| Stop gate | `Add a Troubleshooting section to setup.md covering what to do when port 3000 is already in use and when npm run migrate fails because Postgres isn't running.` | Claude writes the section, then is made to run `distill.py --agent` before it can finish | The edit or Stop hooks aren't running |
+| Dictation | `Append this paragraph to setup.md, word for word:` followed by any 60-plus-word paragraph | It appends and finishes without distilling | The prompt hook or the dictation match isn't working |
+
+Record each result, with any error text word for word. Fix anything that fails with a test that reproduces it first.
