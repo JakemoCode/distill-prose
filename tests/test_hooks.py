@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -131,6 +132,40 @@ class Hooks(unittest.TestCase):
         self.assertEqual(set(config), {'PreToolUse', 'PostToolUse', 'Stop', 'UserPromptSubmit'})
         for entries in config.values():
             self.assertIn('${CLAUDE_PLUGIN_ROOT}/hooks/edit.py', entries[0]['hooks'][0]['command'])
+
+
+class PromptLog(unittest.TestCase):
+    """What the hooks keep of what the user typed: little, and not for long."""
+
+    def setUp(self):
+        self.store = tempfile.TemporaryDirectory()
+        self.env = {**os.environ, 'TMPDIR': self.store.name}
+        self.sessions = Path(self.store.name) / 'distill-prose'
+
+    def tearDown(self):
+        self.store.cleanup()
+
+    def prompt(self, text, session='s1'):
+        done = subprocess.run([sys.executable, str(HOOK), 'prompt'],
+                              input=json.dumps({'session_id': session, 'prompt': text}),
+                              capture_output=True, text=True, env=self.env)
+        self.assertEqual(done.returncode, 0, done.stderr)
+
+    def test_only_the_last_ten_prompts_are_kept(self):
+        for n in range(12):
+            self.prompt(f'prompt number {n}')
+        kept = json.loads((self.sessions / 's1.json').read_text())['prompts']
+        self.assertEqual(kept, [f'prompt number {n}' for n in range(2, 12)])
+
+    def test_a_session_untouched_for_a_day_is_deleted_when_any_hook_runs(self):
+        self.prompt('old session', session='old')
+        self.prompt('recent session', session='recent')
+        day_and_an_hour_ago = time.time() - 25 * 3600
+        os.utime(self.sessions / 'old.json', (day_and_an_hour_ago, day_and_an_hour_ago))
+
+        self.prompt('a new prompt', session='other')
+        self.assertFalse((self.sessions / 'old.json').exists())
+        self.assertTrue((self.sessions / 'recent.json').exists())
 
 
 if __name__ == '__main__':

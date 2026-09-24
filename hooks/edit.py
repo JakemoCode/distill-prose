@@ -35,6 +35,7 @@ def main():
     event = sys.argv[1]
     data = json.load(sys.stdin)
     session = data.get('session_id') or 'unknown'
+    pending.prune()
 
     if event == 'prompt':
         pending.record_prompt(session, data.get('prompt') or '')

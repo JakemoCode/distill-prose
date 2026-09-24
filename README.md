@@ -65,7 +65,7 @@ A stamped doc is billed only for new text. The doc is split into blocks (paragra
 
 Anchors are the exact-match facts in the peak draft: code, identifiers, numbers, URLs, paths, versions and all-caps emphasis. Every pass is checked against them. The blind review at the end catches what exact matching can't, including lost reasons, examples and emphasis.
 
-The hooks diff a stamped doc's blocks around every Edit or Write, which records exactly what the agent added. They also record what you type, so text you dictated ("add exactly this: …") counts as yours, even after a light copyedit. The Stop hook blocks the end of a turn while the agent owes 50 or more words. It blocks once, so a session that can't distill isn't trapped.
+The hooks diff a stamped doc's blocks around every Edit or Write, which records exactly what the agent added. They also record what you type, so text you dictated ("add exactly this: …") counts as yours, even after a light copyedit. That record is small on purpose: your last 10 prompts per session, in a file in your system temp folder, deleted once the session has sat untouched for a day. The Stop hook blocks the end of a turn while the agent owes 50 or more words. It blocks once, so a session that can't distill isn't trapped.
 
 In a repo that runs docs-distillation-gate, the skill hands the doc to the gate.
 
