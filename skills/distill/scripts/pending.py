@@ -17,12 +17,14 @@ import difflib
 import json
 import re
 import tempfile
+import time
 from pathlib import Path
 
 import prose
 
 STORE = Path(tempfile.gettempdir()) / 'distill-prose'
-PROMPTS_KEPT = 50
+PROMPTS_KEPT = 10  # enough for a reply to the script, not a record of the conversation
+SESSION_TTL = 24 * 3600  # seconds a session file may sit untouched before a hook deletes it
 DICTATED_SHARE = 0.9  # of a block's words, in order, found in one prompt
 
 
@@ -42,6 +44,18 @@ def _save(session_id, data):
 
 def _sessions():
     return sorted(STORE.glob('*.json')) if STORE.exists() else []
+
+
+def prune(now=None):
+    """Delete session files nobody has written to for a day.
+
+    An active session rewrites its file on every prompt, so only sessions that
+    have ended age out. What an agent owed in one goes with it.
+    """
+    cutoff = (now or time.time()) - SESSION_TTL
+    for path in _sessions():
+        if path.stat().st_mtime < cutoff:
+            path.unlink(missing_ok=True)
 
 
 # What the user typed ----------------------------------------------------------
