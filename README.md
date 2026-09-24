@@ -1,80 +1,76 @@
 # distill-prose
 
-## What it does
+A Claude Code plugin that cuts markdown docs down in measured passes and keeps them cut.
 
-Agents love prose. Prose rots brains. distill-prose makes an agent cut a markdown doc down in measured passes, and it checks the cut with numbers instead of taking the agent's word for it.
+Agents love prose. Prose rots brains. Ask a model to be concise and you get a doc that sounds concise. distill-prose measures the doc instead. A script counts the prose after every pass, the doc isn't done until the numbers say so, and a second agent checks that nothing a reader needs was lost.
 
-Point it at one doc. A script counts the prose after every pass and prints the agent's next instruction. The doc is done at half its longest draft, or when cutting stops paying off: 3+ passes, the last 2 each under 5%, ending at 65% or less. Before it says done, a second agent that never saw the cuts compares the original with the result and lists anything that went missing.
+It's the per-doc companion to [docs-distillation-gate](https://github.com/JakemoCode/docs-distillation-gate), which enforces the same measurement in CI. distill-prose needs no CI and no git.
 
-Then it stamps the doc. When an agent later adds to a stamped doc, like a new rule in AGENTS.md, hooks catch it, and the agent has to distill its addition before it can end its turn. Text you write yourself is never billed.
+## Install
 
-## How to use it
-
-### Install
+Requires Claude Code and `python3`. It uses the standard library only.
 
 ```
 /plugin marketplace add JakemoCode/distill-prose
 /plugin install distill-prose@distill-prose
 ```
 
-It needs `python3` and nothing else. In Cowork, the plugin installs from the Customize tab. It hasn't been tested there yet.
+Start a new session, or run `/reload-plugins`. To update later, run `/plugin marketplace update distill-prose` and then `/plugin update distill-prose@distill-prose`, and restart.
 
-### Distill a doc
+Cowork installs Claude Code plugins from its Customize tab, but this one hasn't been tested there yet.
 
-Ask Claude: "distill docs/setup.md". The skill runs the script and does what it prints. That means a grammar pass in ASD-STE100 Simplified Technical English, then a pass that turns the content into a procedure, a table or a list where it fits, then passes that cut fluff until the numbers say stop.
+## What it does
 
-The script refuses a pass that breaks the method, and says why:
-
-- a grammar pass that cut more than 10%
-- a shape pass that cut more than 30%
-- a number, command, identifier, URL, path or ALL-CAPS word that disappeared
-- a change to text that was already distilled
-
-### Presets
-
-| Preset | Done at | Or converged at |
-| --- | --- | --- |
-| aggressive (default) | 50% | 65% |
-| moderate | 60% | 75% |
-| relaxed | 70% | 85% |
-
-You pick the preset by naming it: "distill AGENTS.md, moderate". Claude may suggest one for CLAUDE.md, AGENTS.md or a skill, but the script only accepts a preset once you've typed its name. The preset is saved in the doc's stamp.
-
-### When the text won't cut
-
-Some text is all steps and commands, and it can't reach the target. After 5 attempts in a row that get nowhere, whether refused or cutting under 5%, the script reports `STALLED`, ends the run, and Claude shows you the curve. Nothing gets stamped, and Claude can move on. Later you can ask for it again with a gentler preset, or accept it as it stands. To accept, you reply with a short phrase Claude shows you, such as `accept 3f9a2c`. The script checks for it in what you typed, so Claude can't accept for you. The stamp then says `stopped`.
-
-Text you dictate ("add exactly this: …") isn't billed. The hooks match it against what you typed, so you don't have to say anything.
-
-### What it writes
-
-- A stamp on the first line after any frontmatter: `<!-- distill-prose a1b2c3 moderate 539->310 -->`.
-- For a git-tracked doc, nothing else. Commit when it's done, and that commit is the reference point next time.
-- For an untracked doc, a `.distill.json` in the same folder, holding a hash and word count per paragraph. It stores no text.
-- A `.distill/` scratch folder while a distillation runs. It ignores itself in git.
-
-## Why I built it
-
-Ask a model to be concise and you get a doc that sounds concise. I built [docs-distillation-gate](https://github.com/JakemoCode/docs-distillation-gate) to measure that in CI. distill-prose is the same measurement for any file in any folder, with no CI and no git required. It also covers the docs that keep growing after they've been cut, which are the ones agents write into most: AGENTS.md, CLAUDE.md and runbooks.
+- **Distills one doc when you ask.** Say "distill docs/setup.md", or run `/distill-prose:distill`. Claude makes a grammar pass in ASD-STE100 Simplified Technical English, then a pass that turns the doc into a procedure, table or list where it fits, then passes that cut fluff. It's done when the doc is at half its longest draft, or when cutting stops paying off.
+- **Checks that the facts survived.** Every number, command, identifier, URL, path and ALL-CAPS word from the draft must still be there after each pass. Before it finishes, a subagent that never saw the cuts compares the draft with the result and lists what a reader would miss.
+- **Keeps the doc cut.** A distilled doc gets a stamp comment on its first line. When an agent later adds to a stamped doc, it has to distill its addition before it can end its turn. Text you write yourself, or dictate word for word, is never billed.
+- **Stops instead of grinding.** After 5 attempts in a row that get nowhere, the run ends and Claude shows you the curve. Nothing is stamped.
 
 ## How it works
 
-The counter is a port of the gate's. Only prose counts. Code blocks, inline code, HTML comments and markdown syntax don't. `fixtures/counting` holds cases the gate itself produced, and both counters must agree on them.
+**Counting.** Only prose counts. Code blocks, inline code, HTML comments and markdown syntax don't. The counter is a port of docs-distillation-gate's, and both must pass the cases in `fixtures/counting`.
 
-A stamped doc is billed only for new text. The doc is split into blocks (paragraphs, list items, table rows, headings) and compared with the version at the stamp. A new block is billed in full, and an edited block only for its growth, so fixing a typo costs nothing.
+**The curve.** The script records the prose count after every pass. A doc passes at its preset's target share of its longest draft. It also passes if it converges: 3+ passes, the last 2 each cutting under 5%, ending at or below the preset's ceiling. A pass that breaks the method is refused. That covers a grammar pass that cuts, a shape pass that deletes, a dropped anchor, or an edit to text that was already distilled.
 
-Anchors are the exact-match facts in the peak draft: code, identifiers, numbers, URLs, paths, versions and all-caps emphasis. Every pass is checked against them. The blind review at the end catches what exact matching can't, including lost reasons, examples and emphasis.
+**Living docs.** A stamped doc is billed only for new text. The script splits the doc into paragraphs, list items, table rows and headings, and compares them with the version at the stamp. For a git-tracked doc, that's the commit that carries the stamp. For an untracked doc, it's a `.distill.json` beside the doc, holding a hash and word count per block and no text.
 
-The hooks diff a stamped doc's blocks around every Edit or Write, which records exactly what the agent added. They also record what you type, so text you dictated ("add exactly this: …") counts as yours, even after a light copyedit. That record is small on purpose: your last 10 prompts per session, in a file in your system temp folder, deleted once the session has sat untouched for a day. The Stop hook blocks the end of a turn while the agent owes 50 or more words. It blocks once, so a session that can't distill isn't trapped.
+**Hooks.** Edit and Write hooks record exactly what an agent writes into a stamped doc. A Stop hook blocks the end of a turn while the agent owes 50 or more words, and it only blocks once. A prompt hook keeps your last 10 prompts per session in your system temp folder, and deletes a session's file once it has sat untouched for a day. The plugin reads those prompts for three things only: text you dictated, a preset you named, and the `accept` phrase.
 
-In a repo that runs docs-distillation-gate, the skill hands the doc to the gate.
+**Your decisions stay yours.** The agent can't choose a gentler preset or accept a doc as it stands on its own. The script checks what you typed.
 
-[DESIGN.md](DESIGN.md) has every decision and the reason for it.
+In a repo that runs docs-distillation-gate, the skill hands the doc to the gate. [DESIGN.md](DESIGN.md) records every decision and the reason for it.
 
-### What it can't do
+## Configuration
 
-- It can't tell a good cut from a bad one. It proves that editing happened and that exact facts survived. The blind review is the only check on meaning.
+There's no config file. You control these:
+
+| Setting | How | Default |
+| --- | --- | --- |
+| Preset | Name it in your request: "distill AGENTS.md, moderate" | aggressive |
+| Accept a doc as it stands | Reply with the `accept` phrase Claude shows you, such as `accept 3f9a2c` | off |
+| Hooks and skill | `/plugin disable distill-prose@distill-prose` | on |
+
+| Preset | Done at | Or converged at |
+| --- | --- | --- |
+| aggressive | 50% | 65% |
+| moderate | 60% | 75% |
+| relaxed | 70% | 85% |
+
+The preset is saved in the doc's stamp, so re-distilling a doc reuses it. The thresholds (the 50-word floor, 5 fruitless attempts, the 10% grammar limit) are constants in `skills/distill/scripts/`, for anyone forking.
+
+What it writes:
+
+- a stamp on the first line after any frontmatter: `<!-- distill-prose a1b2c3 moderate 539->310 -->`
+- `.distill.json` beside an untracked doc
+- a `.distill/` scratch folder during a run, which ignores itself in git and is removed at the end
+- session files in `$TMPDIR/distill-prose/`, which expire after a day
+
+## Limits
+
+- It proves that editing happened and that exact facts survived. Only the blind review judges meaning.
 - It only sees edits made through the Edit and Write tools. An agent that rewrites a doc with `sed` goes unbilled.
 - The thresholds came from a small sample. Treat early results as calibration.
 
-MIT licensed. Python standard library, no dependencies.
+## License
+
+MIT
