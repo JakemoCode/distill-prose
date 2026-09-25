@@ -76,4 +76,10 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    # These hooks run on every prompt and every edit in every session. An error
+    # printed there shows up on each one, so a failure skips this one check
+    # instead. The Stop gate simply doesn't block that turn.
+    try:
+        main()
+    except Exception:
+        pass

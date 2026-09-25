@@ -342,6 +342,14 @@ class Session(unittest.TestCase):
         self.write(paragraphs(20))
         self.assertIn('(moderate) at 120', text_of(self.run_step(preset='moderate')))
 
+    def test_a_corrupt_session_file_does_not_break_a_distillation(self):
+        # A crash mid-write, or two sessions writing at once, can leave half a file.
+        pending.record_prompt('s1', 'Distill guide.md, moderate please.')
+        (pending.STORE / 'broken.json').write_text('{"docs": {')
+        self.write(paragraphs(20))
+        self.assertIn('(moderate)', text_of(self.run_step(preset='moderate')))
+        self.distill_fresh()  # settles owed text across every session file
+
     def test_a_preset_the_user_never_named_is_refused(self):
         pending.record_prompt('s1', 'Distill guide.md.')
         self.write(paragraphs(20))

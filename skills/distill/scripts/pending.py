@@ -9,49 +9,115 @@ the evidence for every decision that belongs to the user: text the user
 dictated is not billed, and a stop or a gentler preset needs a phrase the user
 typed.
 
-Everything lives in per-session files in the system temp directory, because it
-belongs to the session that created it, never to the repo.
+Everything lives in per-session files in a folder of the system temp directory
+that only this user can read. It belongs to the session that created it, never
+to the repo, and on Linux the temp directory is shared by every user.
 """
 
 import difflib
 import json
+import os
 import re
+import shutil
+import stat
 import tempfile
 import time
 from pathlib import Path
 
 import prose
 
-STORE = Path(tempfile.gettempdir()) / 'distill-prose'
+_UID = os.getuid() if hasattr(os, 'getuid') else None
+STORE = Path(tempfile.gettempdir()) / f'distill-prose-{_UID if _UID is not None else "user"}'
+LEGACY_STORE = Path(tempfile.gettempdir()) / 'distill-prose'  # 0.3.1 and earlier: readable by all users
 PROMPTS_KEPT = 10  # enough for a reply to the script, not a record of the conversation
 SESSION_TTL = 24 * 3600  # seconds a session file may sit untouched before a hook deletes it
 DICTATED_SHARE = 0.9  # of a block's words, in order, found in one prompt
+
+
+def _owned_folder(path):
+    """True when path is a real folder, not a link, and belongs to this user."""
+    try:
+        info = path.lstat()
+    except OSError:
+        return False
+    return stat.S_ISDIR(info.st_mode) and (_UID is None or info.st_uid == _UID)
+
+
+def _store():
+    """The store, private to this user, or None when it cannot be trusted.
+
+    Another user on a shared /tmp could create the folder first, or plant a
+    link in its place. Either way nothing is written there.
+    """
+    try:
+        STORE.mkdir(mode=0o700, exist_ok=True)
+    except OSError:
+        return None
+    if not _owned_folder(STORE):
+        return None
+    if STORE.lstat().st_mode & 0o077:
+        os.chmod(STORE, 0o700)
+    return STORE
 
 
 def _path(session_id):
     return STORE / f'{session_id}.json'
 
 
+def _write(path, data):
+    """Write a session file readable only by this user, all at once.
+
+    A reader never sees half a file: the data lands in a temporary file that
+    replaces the real one in a single rename.
+    """
+    temporary = path.with_name(f'.{path.name}.{os.getpid()}.tmp')
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(descriptor, 'w') as out:
+        json.dump(data, out)
+    os.replace(temporary, path)
+
+
+def _read(path):
+    """A session file's data, or None when it is unreadable.
+
+    One bad file must not stop every distillation until it expires.
+    """
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) and isinstance(data.get('docs'), dict) else None
+
+
 def _load(session_id):
-    path = _path(session_id)
-    return json.loads(path.read_text()) if path.exists() else {'docs': {}}
+    return _read(_path(session_id)) or {'docs': {}}
+
+
+def _session_data():
+    """(path, data) for every readable session file."""
+    for path in _sessions():
+        data = _read(path)
+        if data is not None:
+            yield path, data
 
 
 def _save(session_id, data):
-    STORE.mkdir(parents=True, exist_ok=True)
-    _path(session_id).write_text(json.dumps(data))
+    if _store() is not None:
+        _write(_path(session_id), data)
 
 
 def _sessions():
-    return sorted(STORE.glob('*.json')) if STORE.exists() else []
+    return sorted(STORE.glob('*.json')) if _owned_folder(STORE) else []
 
 
 def prune(now=None):
-    """Delete session files nobody has written to for a day.
+    """Delete session files nobody has written to for a day, and the old shared log.
 
     An active session rewrites its file on every prompt, so only sessions that
     have ended age out. What an agent owed in one goes with it.
     """
+    if _owned_folder(LEGACY_STORE):
+        shutil.rmtree(LEGACY_STORE, ignore_errors=True)
     cutoff = (now or time.time()) - SESSION_TTL
     for path in _sessions():
         if path.stat().st_mtime < cutoff:
@@ -68,8 +134,8 @@ def record_prompt(session_id, text):
 
 def all_prompts():
     prompts = []
-    for path in _sessions():
-        prompts.extend(json.loads(path.read_text()).get('prompts', []))
+    for _, data in _session_data():
+        prompts.extend(data.get('prompts', []))
     return prompts
 
 
@@ -146,8 +212,7 @@ def _agents_blocks(doc, entry, prompts):
 def owed(doc):
     """Owed words per block across every session, less what each session's user dictated."""
     merged = {}
-    for path in _sessions():
-        data = json.loads(path.read_text())
+    for _, data in _session_data():
         entry = data['docs'].get(str(doc))
         if entry:
             for digest, words in _agents_blocks(doc, entry, data.get('prompts', [])).items():
@@ -170,7 +235,6 @@ def session_debts(session_id):
 
 def settle(doc):
     """Forget what every session owed on a doc once it has been distilled."""
-    for path in _sessions():
-        data = json.loads(path.read_text())
+    for path, data in _session_data():
         if data['docs'].pop(str(doc), None) is not None:
-            path.write_text(json.dumps(data))
+            _write(path, data)

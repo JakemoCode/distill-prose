@@ -17,6 +17,8 @@ Requires Claude Code on macOS or Linux, and `python3`. It uses the standard libr
 
 Start a new session, or run `/reload-plugins`. To update later, run `/plugin marketplace update distill-prose` and then `/plugin update distill-prose@distill-prose`, and restart.
 
+Every pass runs `python3 …/distill.py`, so Claude Code asks for approval. Pick the option that stops asking for that command. The path includes the plugin version, so it asks once more after each update. A wildcard rule that survives updates would also match other `python3` commands, so it isn't worth it.
+
 ## What it does
 
 - **Distills one doc, only when you ask.** Run `/distill-prose:distill docs/setup.md`. Claude never starts it on its own, so asking to "shorten" something gets a normal edit. Claude makes a grammar pass in ASD-STE100 Simplified Technical English, then a pass that turns the doc into a procedure, table or list where it fits, then passes that cut fluff. It's done when the doc is at half its longest draft, or when cutting stops paying off.
@@ -32,7 +34,7 @@ Start a new session, or run `/reload-plugins`. To update later, run `/plugin mar
 
 **Living docs.** A stamped doc is billed only for new text. The script splits the doc into paragraphs, list items, table rows and headings, and compares them with the version at the stamp. For a git-tracked doc, that's the commit that carries the stamp. For an untracked doc, it's a `.distill.json` beside the doc, holding a hash and word count per block and no text.
 
-**Hooks.** The hooks are the only automatic part, and they only act on docs someone chose to distill. Edit and Write hooks record exactly what an agent writes into a stamped doc. A Stop hook blocks the end of a turn while the agent owes 50 or more words, and it only blocks once. A prompt hook keeps your last 10 prompts per session in your system temp folder, and deletes a session's file once it has sat untouched for a day. The plugin reads those prompts for three things only: text you dictated, a preset you named, and the `accept` phrase.
+**Hooks.** The hooks are the only automatic part, and they only act on docs someone chose to distill. Edit and Write hooks record exactly what an agent writes into a stamped doc. A Stop hook blocks the end of a turn while the agent owes 50 or more words, and it only blocks once. A prompt hook keeps your last 10 prompts per session in a folder of your system temp folder that only you can read, and deletes a session's file once it has sat untouched for a day. The plugin reads those prompts for three things only: text you dictated, a preset you named, and the `accept` phrase.
 
 **Your decisions stay yours.** The agent can't choose a gentler preset or accept a doc as it stands on its own. The script checks what you typed.
 
@@ -61,7 +63,7 @@ What it writes:
 - a stamp on the first line after any frontmatter: `<!-- distill-prose a1b2c3 moderate 539->310 -->`
 - `.distill.json` beside an untracked doc
 - a `.distill/` scratch folder during a run, which ignores itself in git and is removed at the end
-- session files in `$TMPDIR/distill-prose/`, which expire after a day
+- session files in `$TMPDIR/distill-prose-<your user id>/`, readable only by you, which expire after a day
 
 ## Limits
 
