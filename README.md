@@ -8,7 +8,7 @@ It's the per-doc companion to [docs-distillation-gate](https://github.com/Jakemo
 
 ## Install
 
-Requires Claude Code and `python3`. It uses the standard library only.
+Requires Claude Code on macOS or Linux, and `python3`. It uses the standard library only.
 
 ```
 /plugin marketplace add JakemoCode/distill-prose
@@ -16,8 +16,6 @@ Requires Claude Code and `python3`. It uses the standard library only.
 ```
 
 Start a new session, or run `/reload-plugins`. To update later, run `/plugin marketplace update distill-prose` and then `/plugin update distill-prose@distill-prose`, and restart.
-
-Cowork installs Claude Code plugins from its Customize tab, but this one hasn't been tested there yet.
 
 ## What it does
 
@@ -69,6 +67,8 @@ What it writes:
 
 - It proves that editing happened and that exact facts survived. Only the blind review judges meaning.
 - It only sees edits made through the Edit and Write tools. An agent that rewrites a doc with `sed` goes unbilled.
+- It's built for Claude Code only. Other harnesses, Cowork included, are out of scope.
+- The hooks call `python3`, which Windows usually doesn't have under that name, so expect hook errors there.
 - The thresholds came from a small sample. Treat early results as calibration.
 
 ## License

@@ -5,8 +5,8 @@ Decisions from the design grilling on 2026-09-23, with the reason for each. Chan
 ## Scope
 
 - One doc at a time. The skill acts on the doc it is pointed at, and the hooks act only on docs that carry a distill-prose stamp.
-- Claude Code first. The plugin format also installs in Cowork, which is untested. See [Next steps](#next-steps).
-- Python 3, standard library only. Anthropic's built-in skills run Python in Cowork, and nothing documents Node there.
+- Claude Code only. Cowork and other harnesses are out of scope, by decision on 2026-09-25.
+- Python 3, standard library only, so there is nothing to install. It was picked while Cowork was in scope, where Python is documented and Node isn't. It stays because it works and needs nothing extra. On Windows the hooks' `python3` command usually doesn't exist, which is a known limit.
 - When the script cannot run (no `python3`, or the command is refused), the skill stops. An unmeasured distillation is the failure this tool exists to prevent.
 
 ## Measuring
@@ -22,7 +22,7 @@ Decisions from the design grilling on 2026-09-23, with the reason for each. Chan
 
 - The user picks the preset, and it is stored in the stamp. The agent may suggest one and never picks it. A preset the agent can choose becomes the easy way out. The script accepts `moderate` or `relaxed`, on the first run or partway through, only once that word appears in something the user typed this session. The word is specific enough to need no one-time code. A person running the script in a terminal needs no evidence, which the script detects from stdin being a TTY. An agent's shell never has one.
 - After 5 attempts in a row that get nowhere, the script reports `STALLED` and ends the session itself. An attempt gets nowhere when the script refuses it, or when a fluff pass fails to set a new low by 5%. A valid grammar or shape pass, or a real cut, resets the count. The stall releases the agent from what it owed and stamps nothing, so the uncut text stays new since the stamp for the user to ask about again. Before this exit existed, a Haiku run looped for 18 passes and then faked the user's stop. A later run got 5 refused passes in a row and faked the user's dictation.
-- Only the user accepts text as it stands, which stamps it `stopped`. "Accept" and "stop" are too common to count as evidence, so the script asks for a one-time phrase, such as `accept 3f9a2c`. It refuses `--stop`, prints the phrase for the agent to relay, and succeeds once the phrase shows up in a prompt the user typed. This works the same in Cowork, which has no `!` prefix. After a stall, `--stop` starts a new session and asks for the phrase the same way.
+- Only the user accepts text as it stands, which stamps it `stopped`. "Accept" and "stop" are too common to count as evidence, so the script asks for a one-time phrase, such as `accept 3f9a2c`. It refuses `--stop`, prints the phrase for the agent to relay, and succeeds once the phrase shows up in a prompt the user typed. The agent can see the phrase but can't type it into the user's prompt. After a stall, `--stop` starts a new session and asks for the phrase the same way.
 
 ## Passes
 
@@ -53,25 +53,15 @@ Decisions from the design grilling on 2026-09-23, with the reason for each. Chan
 - A `UserPromptSubmit` hook records what the user types. It runs in every session, so the record stays small: the last 10 prompts per session, and every hook run deletes session files untouched for a day. A block the agent wrote counts as dictated, and isn't billed, when 90% of its words appear in order in one of the user's prompts in that session. Case, whitespace and markdown syntax are ignored. There is no flag for it: a `--dictated` flag was the second escape hatch a Haiku run used to fake the user's word.
 - An explicit request to distill a doc bills everything new since the stamp. The Stop hook's `--agent` bills only the agent's text.
 
-## Next steps
+## Manual check
 
-### Cowork smoke test
+Run this in Claude Code before sharing a release. Copy `fixtures/smoke/setup.md` into an empty folder outside any repo, then start each test in a new session:
 
-Nobody has run the plugin in Cowork. Anthropic's docs say Cowork runs plugin skills, hooks and subagents, and runs commands in a Linux VM. They don't say whether `python3` is there or whether `UserPromptSubmit` hooks fire. The preset check, the accept phrase and dictation all depend on that hook.
+| Test | Type | Pass |
+| --- | --- | --- |
+| Invocation and preset | `/distill-prose:distill setup.md moderate` | "Recorded setup.md: 539 prose words", with "(moderate)" |
+| Full run | Let it continue | Passes, a blind-review subagent, then `DONE`. `setup.md` starts with a `distill-prose` stamp, `.distill.json` exists, and `.distill/` is gone |
+| Stop gate | `Add a Troubleshooting section to setup.md covering what to do when port 3000 is already in use and when npm run migrate fails because Postgres isn't running.` | Claude writes the section, then is made to run `distill.py --agent` before it can finish |
+| Dictation | `Append this paragraph to setup.md, word for word:` followed by any 60-plus-word paragraph | It appends and finishes without distilling |
 
-Setup:
-
-1. Install the plugin from Cowork's Customize tab, from GitHub (`JakemoCode/distill-prose`). If that isn't offered, upload a zip made with `git archive --format=zip --prefix=distill-prose/ -o distill-prose.zip main`.
-2. Copy `fixtures/smoke/setup.md` into an empty folder and connect that folder.
-3. Approve Python commands when asked.
-
-Run each test in a new chat:
-
-| Test | Type | Pass | Fail means |
-| --- | --- | --- | --- |
-| Script, path, prompt hook | `Distill setup.md, moderate.` | "Recorded setup.md: 539 prose words", with "(moderate)" | "Only the user picks a preset": the prompt hook isn't running. An error: no `python3`, or the path didn't resolve |
-| Full run | Let the first test continue | Passes, a blind-review subagent, then `DONE`. `setup.md` starts with a `distill-prose` stamp, `.distill.json` exists, and `.distill/` is gone | Note where it stopped and what it printed |
-| Stop gate | `Add a Troubleshooting section to setup.md covering what to do when port 3000 is already in use and when npm run migrate fails because Postgres isn't running.` | Claude writes the section, then is made to run `distill.py --agent` before it can finish | The edit or Stop hooks aren't running |
-| Dictation | `Append this paragraph to setup.md, word for word:` followed by any 60-plus-word paragraph | It appends and finishes without distilling | The prompt hook or the dictation match isn't working |
-
-Record each result, with any error text word for word. Fix anything that fails with a test that reproduces it first.
+Fix anything that fails with a test that reproduces it first.
