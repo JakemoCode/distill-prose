@@ -1,6 +1,6 @@
 {
   "name": "distill-prose",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Distill any markdown doc in measured passes, with a blind review of what was cut and hooks that make agents distill what they add to distilled docs.",
   "author": {
     "name": "Jake Mosher"

@@ -4,7 +4,7 @@
 Run it before the first edit and after every pass. Its output is the next
 instruction. Exit 0 means DONE and nothing else does.
 
-  distill.py <doc> [--preset aggressive|moderate|relaxed]
+  distill.py <doc> [aggressive|moderate|relaxed]   or --preset <name>
   distill.py <doc> --reviewed   the blind review is done
   distill.py <doc> --stop       the user replied with the accept phrase
   distill.py <doc> --undo       restore the last recorded version
@@ -518,6 +518,9 @@ def step(doc, flag=None, preset=None):
 def main():
     parser = argparse.ArgumentParser(description='Distill one markdown doc in measured passes.')
     parser.add_argument('doc')
+    # The preset may also follow the doc as a plain word, the way the skill's
+    # usage line shows it.
+    parser.add_argument('preset_word', nargs='?', choices=sorted(prose.PRESETS), metavar='preset')
     parser.add_argument('--preset', choices=sorted(prose.PRESETS))
     group = parser.add_mutually_exclusive_group()
     for name in ('reviewed', 'stop', 'undo', 'agent', 'reset'):
@@ -531,7 +534,7 @@ def main():
 
     flag = next((name for name in ('reviewed', 'stop', 'undo', 'agent', 'reset')
                  if getattr(args, name)), None)
-    done, lines = step(doc, flag, args.preset)
+    done, lines = step(doc, flag, args.preset or args.preset_word)
     print('\n'.join(lines))
     stalled = any(line.startswith('STALLED') for line in lines)
     sys.exit(0 if done else 3 if stalled else 1)

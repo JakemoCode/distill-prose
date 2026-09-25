@@ -1,6 +1,7 @@
 ---
 name: distill
-description: Distill a markdown doc in measured passes until its prose halves or stops falling. Use when asked to distill or shorten a doc, before the first edit, or when a Stop hook says you owe a distillation.
+description: Distill a markdown doc in measured passes until its prose halves or stops falling. Usage /distill-prose:distill <doc> [moderate|relaxed]
+disable-model-invocation: true
 ---
 
 # Distill
@@ -11,7 +12,7 @@ The script lives in this skill's base directory, the path you were given when th
 python3 "<base directory>/scripts/distill.py" <doc>
 ```
 
-**The script's output is your next instruction.** Run it before your first edit and after every pass, and do exactly what it prints. You are finished only when it prints `DONE` and exits 0. When a Stop hook says you owe a distillation, run the command the hook gives. When the script prints `STALLED`, the session is over and you owe nothing more on the doc: tell the user the curve and end your turn. Some choices need the user's own words. The script says what it needs, and checks what the user typed.
+**The script's output is your next instruction.** Run it before your first edit and after every pass, and do exactly what it prints. You are finished only when it prints `DONE` and exits 0. When the script prints `STALLED`, the session is over and you owe nothing more on the doc: tell the user the curve and end your turn. Some choices need the user's own words. The script says what it needs, and checks what the user typed.
 
 When `python3` is missing or the command is refused, stop and tell the user. distill-prose measures every pass, and an unmeasured distillation is what it exists to prevent.
 
