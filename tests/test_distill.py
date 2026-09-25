@@ -272,6 +272,12 @@ class Session(unittest.TestCase):
                              text=True, env=env, stdin=subprocess.DEVNULL)
         self.assertEqual(run.returncode, 3, run.stdout)
 
+    def test_the_skill_runs_only_when_the_user_invokes_it(self):
+        skill = (ROOT / 'skills' / 'distill' / 'SKILL.md').read_text()
+        frontmatter = skill.split('---')[1]
+        self.assertIn('disable-model-invocation: true', frontmatter)
+        self.assertNotIn('Use when', frontmatter)  # no trigger phrases for a model to act on
+
     def test_the_skill_never_offers_the_agent_dictation(self):
         skill = (ROOT / 'skills' / 'distill' / 'SKILL.md').read_text()
         self.assertNotIn('dictated', skill)
@@ -393,6 +399,21 @@ class Git(unittest.TestCase):
 
 
 class Cli(unittest.TestCase):
+    def test_a_preset_can_follow_the_doc_as_a_plain_word(self):
+        # The skill's usage line reads `<doc> [moderate|relaxed]`, and a weak
+        # model passes the preset exactly that way.
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as store:
+            env = {**os.environ, 'TMPDIR': store}
+            subprocess.run([sys.executable, str(ROOT / 'hooks' / 'edit.py'), 'prompt'], text=True, env=env,
+                           input=json.dumps({'session_id': 's1', 'prompt': '/distill-prose:distill d.md moderate'}),
+                           check=True)
+            doc = Path(tmp) / 'd.md'
+            doc.write_text(paragraphs(20))
+            script = ROOT / 'skills' / 'distill' / 'scripts' / 'distill.py'
+            run = subprocess.run([sys.executable, str(script), str(doc), 'moderate'], capture_output=True,
+                                 text=True, env=env, stdin=subprocess.DEVNULL)
+            self.assertIn('(moderate)', run.stdout, run.stderr)
+
     def test_exit_codes(self):
         with tempfile.TemporaryDirectory() as tmp:
             doc = Path(tmp) / 'd.md'

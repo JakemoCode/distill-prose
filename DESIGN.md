@@ -45,6 +45,7 @@ Decisions from the design grilling on 2026-09-23, with the reason for each. Chan
 
 ## Hooks
 
+- The skill is invoke-only (`disable-model-invocation: true`). It starts when a user types `/distill-prose:distill`, never because Claude decided a doc needed shortening, since an unasked-for five-pass run with a review subagent is a nasty surprise. The hooks are the only automatic part, and they act only on stamped docs. When the Stop hook forces a distillation, the agent runs the script directly, and the script's output carries every instruction it needs.
 - PreToolUse and PostToolUse on Edit/Write diff a stamped doc's blocks, so they record exactly what the agent wrote. Human edits never pass through them and are never billed.
 - The Stop hook blocks the end of a turn while the agent owes 50+ words on a stamped doc. It blocks once. On a second stop it lets the session end and lists what is owed.
 - The hooks stay quiet while a distillation of that doc is running.
