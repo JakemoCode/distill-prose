@@ -165,7 +165,7 @@ def agent_reference(current, owed):
 def phase_instruction(number, scoped):
     where = 'the new text' if scoped else 'the doc'
     keep = ('Keep every fact, instruction, number, constraint, reason for a rule, example, '
-            'and piece of deliberate emphasis.')
+            'and piece of deliberate emphasis. Add nothing the draft does not say.')
     if number == 1:
         return (f'Pass 1 (grammar): rewrite {where} in ASD-STE100 Simplified Technical English. '
                 f'Change grammar only; the count may rise. {keep}')
@@ -336,6 +336,9 @@ def start(doc, text, preset, agent_only):
     save_state(folder, root, state)
     (folder / 'peak.md').write_text(text)
     (folder / 'last.md').write_text(text)
+    # The doc as the session found it. Unlike the peak it never moves, so a
+    # pass that invents something and grows the doc cannot make it look original.
+    (folder / 'draft.md').write_text(text)
 
     scoped = bool(ref)
     lines += [
@@ -420,6 +423,16 @@ def step(doc, flag=None, preset=None):
             *[f'  {anchor}' for anchor in missing],
             f'Put them back (or `{run_line(doc, "--undo")}`), then run this again. Nothing was recorded.'])
 
+    draft = folder / 'draft.md'
+    if draft.exists():  # sessions started before 0.3.1 have no draft saved
+        written = prose.changed_blocks(state['reference'], prose.blocks(prose.body(text)))
+        made_up = prose.invented([block[2] for block in written], prose.body(draft.read_text()))
+        if made_up:
+            return no_progress(doc, folder, root, state, [
+                'This pass added these, and the draft never had them:',
+                *[f'  {anchor}' for anchor in made_up],
+                "Remove them, or use the draft's wording. Nothing was recorded."])
+
     count = prose.billed(state['reference'], current)
     points = state['points']
     passes = len(points) - 1
@@ -459,8 +472,6 @@ def step(doc, flag=None, preset=None):
         if count > max(points[:-1]):
             (folder / 'peak.md').write_text(text)
             state['peak_hidden'] = prose.count_words(text)[1]
-            new_blocks = prose.changed_blocks(state['reference'], prose.blocks(prose.body(text)))
-            state['anchors'] = prose.anchors(block[2] for block in new_blocks)
     elif flag not in ('reviewed', 'stop'):
         lines.append('The prose count has not changed since the last run, so no pass was recorded.')
 

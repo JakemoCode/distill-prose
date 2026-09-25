@@ -116,14 +116,6 @@ class Session(unittest.TestCase):
         self.write(paragraphs(9))
         self.assertIn('Pass 2 removed', text_of(self.run_step()))
 
-    def test_a_pass_that_raises_the_peak_protects_its_new_anchors(self):
-        self.write(paragraphs(20))
-        self.run_step()
-        self.write(paragraphs(20) + '\nThe grammar pass added port 8080 here.\n')
-        self.run_step()
-        self.write(paragraphs(20) + '\nThe grammar pass added a port here.\n')
-        self.assertIn('  8080', self.run_step()[1])
-
     def test_distilling_the_agents_text_settles_what_it_owed(self):
         self.distill_fresh()
         stamped = self.doc.read_text()
@@ -139,6 +131,39 @@ class Session(unittest.TestCase):
             self.run_step()
         self.assertTrue(self.run_step('reviewed')[0])
         self.assertEqual(pending.owed(self.doc), {})
+
+    def test_a_pass_that_invents_an_anchor_is_refused(self):
+        self.write(paragraphs(19) + '\nThe server listens on port 3000 by default here.\n')
+        self.run_step()
+        self.write(paragraphs(19) + '\nThe server listens on port 3000 by default here, or on 8080.\n')
+        done, lines = self.run_step()
+        self.assertFalse(done)
+        self.assertIn('the draft never had them', text_of((done, lines)))
+        self.assertIn('  8080', lines)
+
+    def test_an_invented_anchor_that_raises_the_peak_is_still_refused(self):
+        # Comparing against the peak would let an invention that grows the doc
+        # become part of what the check trusts.
+        self.write(paragraphs(19) + '\nThe server listens on port 3000.\n')
+        self.run_step()
+        self.write(paragraphs(21) + '\nThe server listens on port 3000 or 8080.\n')
+        self.assertIn('  8080', self.run_step()[1])
+
+    def test_restoring_a_command_a_peak_raising_pass_reworded_is_not_invention(self):
+        # A plain-text command is not an anchor, so a grammar pass that grows the
+        # doc can reword it. Putting it back later restores the draft.
+        self.write(paragraphs(19) + '\nStart the server with npm run dev when you are ready.\n')
+        self.run_step()
+        self.write(paragraphs(20) + '\nStart the server with the development script when you are ready.\n')
+        self.run_step()
+        self.write(paragraphs(19) + '\nStart the server with `npm run dev` when you are ready.\n')
+        self.assertNotIn('the draft never had them', text_of(self.run_step()))
+
+    def test_formatting_the_drafts_commands_as_code_passes(self):
+        self.write(paragraphs(19) + '\nRun npm run migrate to set up the tables.\n')
+        self.run_step()
+        self.write(paragraphs(19) + '\nRun `npm run migrate` to set up the tables.\n\n```\nnpm run migrate\n```\n')
+        self.assertIn('Pass 2 (shape)', text_of(self.run_step()))
 
     def test_a_pass_that_drops_an_anchor_is_refused(self):
         self.write(paragraphs(19) + '\nThe server listens on port 3000 by default here.\n')

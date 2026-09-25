@@ -108,6 +108,31 @@ class Anchors(unittest.TestCase):
                     'Start with npm run dev (port 3000). Docs: https://example.com/docs, docs/setup.md. Node v20.1.')
         self.assertEqual(prose.missing_anchors(found, reworded), [])
 
+    def test_a_url_ends_before_the_sentence_does(self):
+        self.assertIn('http://localhost:3000', prose.anchors(['Open http://localhost:3000.']))
+        self.assertNotIn('http://localhost:3000.', prose.anchors(['Open http://localhost:3000.']))
+
+    def test_invented_finds_numbers_and_commands_the_draft_never_had(self):
+        draft = 'Run npm run dev. The server listens on port 3000.'
+        self.assertEqual(prose.invented(['It also listens on 8080.'], draft), ['8080'])
+        self.assertEqual(prose.invented(['```\nnpm run build\n```'], draft), ['npm run build'])
+
+    def test_putting_the_drafts_commands_in_code_is_not_invention(self):
+        draft = 'Run npm run dev to start the server on port 3000.'
+        current = ['Run `npm run dev`.', '```\nnpm run dev\n```', 'It uses port 3000.']
+        self.assertEqual(prose.invented(current, draft), [])
+
+    def test_a_code_block_of_the_drafts_commands_is_checked_line_by_line(self):
+        draft = 'Run npm install, then npm run migrate.'
+        self.assertEqual(prose.invented(['```\nnpm install\nnpm run migrate\n```'], draft), [])
+
+    def test_a_draft_number_written_with_a_unit_or_prefix_is_not_invention(self):
+        self.assertEqual(prose.invented(['Wait 300 seconds.'], 'Wait 5 minutes (300s).'), [])
+        self.assertEqual(prose.invented(['Install Node 20.1.'], 'Install Node v20.1.'), [])
+
+    def test_a_longer_number_does_not_hide_an_invented_one(self):
+        self.assertEqual(prose.invented(['Port 300.'], 'Port 3000.'), ['300'])
+
     def test_list_numbering_is_not_an_anchor(self):
         self.assertNotIn('1', prose.anchors(['1. First step']))
 

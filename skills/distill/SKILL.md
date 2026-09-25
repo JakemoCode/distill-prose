@@ -18,7 +18,7 @@ When `python3` is missing or the command is refused, stop and tell the user. dis
 
 ## What a pass keeps
 
-Facts, instructions, numbers, constraints, reasons for rules, examples, and deliberate emphasis. The last three read like fluff and carry weight: a reason is how a reader applies a rule to a case the rule does not name. When a cut would remove one a reader needs, name it and ask the user.
+Facts, instructions, numbers, constraints, reasons for rules, examples, and deliberate emphasis. The last three read like fluff and carry weight: a reason is how a reader applies a rule to a case the rule does not name. When a cut would remove one a reader needs, name it and ask the user. A pass adds nothing the draft does not say: the script refuses numbers, commands, identifiers and URLs the draft never had.
 
 ## The blind review
 
