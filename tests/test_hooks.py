@@ -100,6 +100,15 @@ class Hooks(unittest.TestCase):
         self.hook('prompt', prompt=f'ok, {phrase}')
         self.assertIn('blind review', self.cli('--stop').stdout)
 
+    def test_a_hook_that_hits_an_error_stays_silent(self):
+        # A hook error shows on every edit. For a stranger that reads as a broken plugin.
+        broken = self.dir / 'latin1.md'
+        broken.write_bytes(STAMP.encode() + b'\ncaf\xe9 au lait\n')
+        for event in ('pre', 'post'):
+            done = subprocess.run([sys.executable, str(HOOK), event], capture_output=True, text=True, env=self.env,
+                                  input=json.dumps({'session_id': 's1', 'tool_input': {'file_path': str(broken)}}))
+            self.assertEqual((done.returncode, done.stdout, done.stderr), (0, '', ''), event)
+
     def test_an_unstamped_doc_is_not_watched(self):
         other = self.dir / 'notes.md'
         other.write_text(paragraphs(3))
@@ -140,7 +149,7 @@ class PromptLog(unittest.TestCase):
     def setUp(self):
         self.store = tempfile.TemporaryDirectory()
         self.env = {**os.environ, 'TMPDIR': self.store.name}
-        self.sessions = Path(self.store.name) / 'distill-prose'
+        self.sessions = Path(self.store.name) / f'distill-prose-{os.getuid()}'
 
     def tearDown(self):
         self.store.cleanup()
@@ -150,6 +159,32 @@ class PromptLog(unittest.TestCase):
                               input=json.dumps({'session_id': session, 'prompt': text}),
                               capture_output=True, text=True, env=self.env)
         self.assertEqual(done.returncode, 0, done.stderr)
+
+    def test_the_prompt_log_is_readable_only_by_its_user(self):
+        self.prompt('something private')
+        self.assertEqual(self.sessions.stat().st_mode & 0o777, 0o700)
+        self.assertEqual((self.sessions / 's1.json').stat().st_mode & 0o777, 0o600)
+
+    def test_a_store_that_already_exists_open_to_others_is_closed(self):
+        self.sessions.mkdir()
+        self.sessions.chmod(0o755)
+        self.prompt('something private')
+        self.assertEqual(self.sessions.stat().st_mode & 0o777, 0o700)
+
+    def test_a_store_that_is_a_symlink_is_never_written_through(self):
+        # On a shared /tmp, another user could plant a link where the store goes.
+        elsewhere = Path(self.store.name) / 'elsewhere'
+        elsewhere.mkdir()
+        self.sessions.symlink_to(elsewhere)
+        self.prompt('something private')
+        self.assertEqual(list(elsewhere.iterdir()), [])
+
+    def test_the_world_readable_log_from_0_3_1_is_removed(self):
+        legacy = Path(self.store.name) / 'distill-prose'
+        legacy.mkdir()
+        (legacy / 'old-session.json').write_text('{"prompts": ["private"]}')
+        self.prompt('hello')
+        self.assertFalse(legacy.exists())
 
     def test_only_the_last_ten_prompts_are_kept(self):
         for n in range(12):
