@@ -297,7 +297,18 @@ def invented(block_texts, draft):
         else:
             keys.update(anchor.strip('`') for anchor in anchors([text]))
     keys.discard('')
-    return missing_anchors(sorted(keys), draft)
+    flat = _squash(draft)
+    made_up = []
+    for key in sorted(keys):
+        if re.fullmatch(r'v?\d+(?:\.\d+)*%?', key):
+            # Only the digits have to match. The draft may have written them as
+            # "300s" or "v20.1", and a longer number such as 3000 does not count.
+            digits = re.escape(key.lstrip('v').rstrip('%'))
+            if not re.search(rf'(?<![\d.]){digits}(?!\d|\.\d)', flat):
+                made_up.append(key)
+        elif key not in flat:
+            made_up.append(key)
+    return made_up
 
 
 def missing_anchors(anchor_list, text):

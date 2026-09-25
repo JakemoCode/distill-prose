@@ -126,6 +126,10 @@ class Anchors(unittest.TestCase):
         draft = 'Run npm install, then npm run migrate.'
         self.assertEqual(prose.invented(['```\nnpm install\nnpm run migrate\n```'], draft), [])
 
+    def test_a_draft_number_written_with_a_unit_or_prefix_is_not_invention(self):
+        self.assertEqual(prose.invented(['Wait 300 seconds.'], 'Wait 5 minutes (300s).'), [])
+        self.assertEqual(prose.invented(['Install Node 20.1.'], 'Install Node v20.1.'), [])
+
     def test_a_longer_number_does_not_hide_an_invented_one(self):
         self.assertEqual(prose.invented(['Port 300.'], 'Port 3000.'), ['300'])
 
