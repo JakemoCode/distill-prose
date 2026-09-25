@@ -22,7 +22,7 @@ Cowork installs Claude Code plugins from its Customize tab, but this one hasn't 
 ## What it does
 
 - **Distills one doc, only when you ask.** Run `/distill-prose:distill docs/setup.md`. Claude never starts it on its own, so asking to "shorten" something gets a normal edit. Claude makes a grammar pass in ASD-STE100 Simplified Technical English, then a pass that turns the doc into a procedure, table or list where it fits, then passes that cut fluff. It's done when the doc is at half its longest draft, or when cutting stops paying off.
-- **Checks that the facts survived.** Every number, command, identifier, URL, path and ALL-CAPS word from the draft must still be there after each pass. Before it finishes, a subagent that never saw the cuts compares the draft with the result and lists what a reader would miss.
+- **Checks that the facts survived, and that none were invented.** Every number, command, identifier, URL, path and ALL-CAPS word from the draft must still be there after each pass, and a pass that adds one the draft never had is refused. Before it finishes, a subagent that never saw the cuts compares the draft with the result and lists what a reader would miss.
 - **Keeps the doc cut.** A distilled doc gets a stamp comment on its first line. When an agent later adds to a stamped doc, it has to distill its addition before it can end its turn. Text you write yourself, or dictate word for word, is never billed.
 - **Stops instead of grinding.** After 5 attempts in a row that get nowhere, the run ends and Claude shows you the curve. Nothing is stamped.
 
@@ -30,7 +30,7 @@ Cowork installs Claude Code plugins from its Customize tab, but this one hasn't 
 
 **Counting.** Only prose counts. Code blocks, inline code, HTML comments and markdown syntax don't. The counter is a port of docs-distillation-gate's, and both must pass the cases in `fixtures/counting`.
 
-**The curve.** The script records the prose count after every pass. A doc passes at its preset's target share of its longest draft. It also passes if it converges: 3+ passes, the last 2 each cutting under 5%, ending at or below the preset's ceiling. A pass that breaks the method is refused. That covers a grammar pass that cuts, a shape pass that deletes, a dropped anchor, or an edit to text that was already distilled.
+**The curve.** The script records the prose count after every pass. A doc passes at its preset's target share of its longest draft. It also passes if it converges: 3+ passes, the last 2 each cutting under 5%, ending at or below the preset's ceiling. A pass that breaks the method is refused. That covers a grammar pass that cuts, a shape pass that deletes, a dropped anchor, an anchor the draft never had, or an edit to text that was already distilled.
 
 **Living docs.** A stamped doc is billed only for new text. The script splits the doc into paragraphs, list items, table rows and headings, and compares them with the version at the stamp. For a git-tracked doc, that's the commit that carries the stamp. For an untracked doc, it's a `.distill.json` beside the doc, holding a hash and word count per block and no text.
 

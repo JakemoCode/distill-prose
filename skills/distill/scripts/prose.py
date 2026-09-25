@@ -255,12 +255,12 @@ def changed_blocks(old, new):
 # identifiers, emphasis, URLs, paths, versions and numbers.
 _ANCHORS = [
     re.compile(r'`[^`\n]+`'),
-    re.compile(r'https?://[^\s)>\]]+'),
+    re.compile(r'https?://[^\s)>\]]*[^\s)>\].,;:!?]'),  # a sentence's closing period is not the URL's
     re.compile(r'\b[A-Z][A-Z0-9]*_[A-Z0-9_]+\b'),
     re.compile(r'\b[A-Z]{2,}\b'),
     re.compile(r'(?:[\w.-]+/)+[\w.-]+'),
     re.compile(r'(?<![\w.])v?\d+(?:\.\d+)+\b'),
-    re.compile(r'(?<![\w.])\d+(?:\.\d+)?%?(?![\w.])'),
+    re.compile(r'(?<![\w.])\d+(?:\.\d+)?%?(?![\w]|\.\d)'),  # a number can end a sentence
 ]
 _SPACE = re.compile(r'\s+')
 
@@ -282,6 +282,22 @@ def anchors(block_texts):
                 found.update(match.group(0) for match in pattern.finditer(line))
     found.discard('')
     return sorted(found)
+
+
+def invented(block_texts, draft):
+    """Anchors in these blocks that the draft never had.
+
+    Code is compared by its text, a code block line by line, so setting the
+    draft's own commands in backticks or a fenced block is not invention.
+    """
+    keys = set()
+    for text in block_texts:
+        if text.lstrip().startswith('```'):
+            keys.update(_squash(line) for line in text.split('\n')[1:-1] if line.strip())
+        else:
+            keys.update(anchor.strip('`') for anchor in anchors([text]))
+    keys.discard('')
+    return missing_anchors(sorted(keys), draft)
 
 
 def missing_anchors(anchor_list, text):
