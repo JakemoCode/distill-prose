@@ -365,6 +365,28 @@ class Session(unittest.TestCase):
         state = distill.load_state(distill.session_dir(self.doc)[0])
         self.assertEqual(state['fruitless'], 0)
 
+    def test_a_grammar_pass_that_grows_more_than_a_tenth_is_refused(self):
+        self.write(prose_words(200))
+        self.run_step()
+        self.write(prose_words(221))
+        done, lines = self.run_step()
+        self.assertIn('from 200 to 221 words', text_of((done, lines)))
+        self.assertIn('at most 10%, to 220', text_of((done, lines)))
+        self.assertIn('Nothing was recorded', text_of((done, lines)))
+        self.assertIn('--undo', text_of((done, lines)))
+        state = distill.load_state(distill.session_dir(self.doc)[0])
+        self.assertEqual(state['points'], [200])
+
+    def test_a_grammar_pass_that_grows_exactly_a_tenth_is_accepted(self):
+        # 150 * 1.10 is exactly 165 in floating point, so this tells > from >=.
+        # 200 * 1.10 is 220.00000000000003, where the two agree.
+        self.write(prose_words(150))
+        self.run_step()
+        self.write(prose_words(165))
+        self.assertIn('Pass 2 (shape)', text_of(self.run_step()))
+        state = distill.load_state(distill.session_dir(self.doc)[0])
+        self.assertEqual(state['points'], [150, 165])
+
     def test_editing_a_code_block_the_agent_wrote_is_not_editing_old_text(self):
         self.distill_fresh()
         stamped = self.doc.read_text()
