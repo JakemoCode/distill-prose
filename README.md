@@ -30,7 +30,7 @@ Every pass runs `python3 …/distill.py`, so Claude Code asks for approval. Pick
 
 **Counting.** Only prose counts. Code blocks, inline code, HTML comments and markdown syntax don't. The counter is a port of docs-distillation-gate's, and both must pass the cases in `fixtures/counting`.
 
-**The curve.** The script records the prose count after every pass. A doc passes at its preset's target share of its longest draft. It also passes if it converges: 3+ passes, the last 2 each cutting under 5%, ending at or below the preset's ceiling. A pass that breaks the method is refused. That covers a grammar pass that cuts, a shape pass that deletes, a dropped anchor, an anchor the draft never had, or an edit to text that was already distilled.
+**The curve.** The script records the prose count after every pass. A doc passes at its preset's target share of its longest draft. It also passes if it converges: 3+ passes, the last 2 each cutting under 5%, ending at or below the preset's ceiling. A pass that breaks the method is refused. That covers any pass that takes the doc more than 10% above the draft, a grammar pass that cuts, a shape pass that deletes, a dropped anchor, an anchor the draft never had, or an edit to text that was already distilled.
 
 **Living docs.** A stamped doc is billed only for new text. The script splits the doc into paragraphs, list items, table rows and headings, and compares them with the version at the stamp. For a git-tracked doc, that's the commit that carries the stamp. For an untracked doc, it's a `.distill.json` beside the doc, holding a hash and word count per block and no text.
 
@@ -56,7 +56,7 @@ There's no config file. You control these:
 | moderate | 60% | 75% |
 | relaxed | 70% | 85% |
 
-The preset is saved in the doc's stamp, so re-distilling a doc reuses it. The thresholds (the 50-word floor, 5 fruitless attempts, the 10% grammar limit) are constants in `skills/distill/scripts/`, for anyone forking.
+The preset is saved in the doc's stamp, so re-distilling a doc reuses it. The thresholds (the 50-word floor, 5 fruitless attempts, the 10% growth limit) are constants in `skills/distill/scripts/`, for anyone forking.
 
 What it writes:
 
