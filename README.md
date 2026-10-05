@@ -32,7 +32,7 @@ Every pass runs `python3 …/distill.py`, so Claude Code asks for approval. Pick
 
 **The curve.** The script records the prose count after every pass. A doc passes at its preset's target share of its longest draft. It also passes if it converges: 3+ passes, the last 2 each cutting under 5%, ending at or below the preset's ceiling. A pass that breaks the method is refused. That covers any pass that takes the doc more than 10% above the draft, a grammar pass that cuts, a shape pass that deletes, a dropped anchor, an anchor the draft never had, or an edit to text that was already distilled.
 
-**Living docs.** A stamped doc is billed only for new text. The script splits the doc into paragraphs, list items, table rows and headings, and compares them with the version at the stamp. For a git-tracked doc, that's the commit that carries the stamp. For an untracked doc, it's a `.distill.json` beside the doc, holding a hash and word count per block and no text.
+**Living docs.** A stamped doc is billed only for new text. The script splits the doc into paragraphs, list items, table rows and headings, and compares them with the version at the stamp. For a git-tracked doc, that's the commit that carries the stamp. For an untracked doc, it's a `.distill.json` beside the doc, holding a hash and word count per block and no text. Distilling only new text, whether the Stop hook asked for it or you did, keeps the stamp's preset and curve, since that run measured the new text and not the doc.
 
 **Hooks.** The hooks are the only automatic part, and they only act on docs someone chose to distill. Edit and Write hooks record exactly what an agent writes into a stamped doc. A Stop hook blocks the end of a turn while the agent owes 50 or more words, and it only blocks once. A prompt hook keeps your last 10 prompts per session in a folder of your system temp folder that only you can read, and deletes a session's file once it has sat untouched for a day. The plugin reads those prompts for three things only: text you dictated, a preset you named, and the `accept` phrase.
 
@@ -69,6 +69,7 @@ What it writes:
 
 - It proves that editing happened and that exact facts survived. Only the blind review judges meaning.
 - It only sees edits made through the Edit and Write tools. An agent that rewrites a doc with `sed` goes unbilled.
+- The stamp line is metadata the script writes. Editing or deleting it, by hand or through an agent, is unsupported.
 - It's built for Claude Code only. Other harnesses, Cowork included, are out of scope.
 - The hooks call `python3`, which Windows usually doesn't have under that name, so expect hook errors there.
 - The thresholds came from a small sample. Treat early results as calibration.

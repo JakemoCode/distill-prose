@@ -31,6 +31,29 @@ def text_of(result):
     return '\n'.join(result[1])
 
 
+def distill_addition(doc, base, tag):
+    """A full run on 60 words added to a stamped doc, through grammar, shape and fluff to DONE."""
+    shorter = paragraphs(6, tag=tag).replace('juliet\n', '\n', 2)  # grammar: 58
+    for addition in (paragraphs(6, tag=tag), shorter, paragraphs(5, tag=tag), paragraphs(3, tag=tag)):
+        doc.write_text(base + '\n' + addition)
+        distill.step(doc)
+    return distill.step(doc, 'reviewed')
+
+
+def agent_adds_and_distills(doc, base, preset=None):
+    """The agent writes `base` plus 60 words into a stamped doc, then the Stop
+    hook's --agent run takes those words through grammar, shape and fluff to DONE."""
+    pending.before_edit('s1', doc)
+    doc.write_text(base + '\n' + paragraphs(6, tag='a'))
+    pending.after_edit('s1', doc)
+    distill.step(doc, 'agent', preset)
+    shorter = paragraphs(6, tag='a').replace('juliet\n', '\n', 2)  # grammar: 58
+    for addition in (shorter, paragraphs(5, tag='a'), paragraphs(3, tag='a')):
+        doc.write_text(base + '\n' + addition)
+        distill.step(doc)
+    return distill.step(doc, 'reviewed')
+
+
 class Session(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -118,19 +141,129 @@ class Session(unittest.TestCase):
 
     def test_distilling_the_agents_text_settles_what_it_owed(self):
         self.distill_fresh()
+        done, lines = agent_adds_and_distills(self.doc, self.doc.read_text())
+        self.assertTrue(done)
+        self.assertIn('60->58->50->30', text_of((done, lines)))  # billed and distilled, not under the floor
+        self.assertEqual(pending.owed(self.doc), {})
+
+    def test_an_agent_run_keeps_the_stamps_curve_and_refreshes_the_sidecar_blocks(self):
+        self.distill_fresh()
+        before = prose.read_stamp(self.doc.read_text())
+        self.assertTrue(agent_adds_and_distills(self.doc, self.doc.read_text())[0])
+        after = prose.read_stamp(self.doc.read_text())
+        self.assertEqual((after['id'], after['preset'], after['curve'], after['stopped']),
+                         (before['id'], 'aggressive', [200, 90], False))
+        entry = json.loads((self.dir / '.distill.json').read_text())[after['id']]
+        self.assertEqual(entry['curve'], [200, 90])
+        self.assertEqual(entry['blocks'], prose.block_list(prose.body(self.doc.read_text())))
+
+    def test_an_agent_run_that_drops_the_stamp_line_keeps_the_docs_curve(self):
+        self.distill_fresh()
+        before = prose.read_stamp(self.doc.read_text())
+        self.assertTrue(agent_adds_and_distills(self.doc, prose.body(self.doc.read_text()))[0])
+        after = prose.read_stamp(self.doc.read_text())
+        self.assertEqual((after['id'], after['preset'], after['curve']), (before['id'], 'aggressive', [200, 90]))
+        self.assertEqual(json.loads((self.dir / '.distill.json').read_text())[after['id']]['curve'], [200, 90])
+
+    def test_an_agent_run_that_edits_the_stamp_line_keeps_the_docs_curve(self):
+        self.distill_fresh()
         stamped = self.doc.read_text()
         pending.before_edit('s1', self.doc)
         self.write(stamped + '\n' + paragraphs(6, tag='a'))
         pending.after_edit('s1', self.doc)
-        self.assertEqual(sum(pending.owed(self.doc).values()), 60)
-
         self.run_step('agent')
+        # The stamp line is outside every block, so no check stops a pass from editing it.
+        edited = prose.write_stamp(stamped, prose.format_stamp(prose.read_stamp(stamped)['id'], 'aggressive', 120, 60))
         shorter = paragraphs(6, tag='a').replace('juliet\n', '\n', 2)  # grammar: 58
         for addition in (shorter, paragraphs(5, tag='a'), paragraphs(3, tag='a')):
-            self.write(stamped + '\n' + addition)
+            self.write(edited + '\n' + addition)
             self.run_step()
         self.assertTrue(self.run_step('reviewed')[0])
-        self.assertEqual(pending.owed(self.doc), {})
+        self.assertEqual(prose.read_stamp(self.doc.read_text())['curve'], [200, 90])
+
+    def test_an_agent_run_the_user_accepts_marks_the_stamp_stopped(self):
+        self.distill_fresh()
+        stamped = self.doc.read_text()
+        pending.before_edit('s1', self.doc)
+        self.write(stamped + '\n' + paragraphs(6, tag='a'))
+        pending.after_edit('s1', self.doc)
+        self.run_step('agent')
+        self.write(stamped + '\n' + paragraphs(6, tag='a').replace('juliet\n', '\n', 2))  # grammar: 58
+        self.run_step()
+        self.user_types(text_of(self.run_step('stop')), 'accept')
+        self.assertIn('Next: a blind review', text_of(self.run_step('stop')))
+        self.assertTrue(self.run_step('reviewed')[0])
+        stamp = prose.read_stamp(self.doc.read_text())
+        self.assertEqual((stamp['curve'], stamp['stopped']), ([200, 90], True))
+        self.assertTrue(json.loads((self.dir / '.distill.json').read_text())[stamp['id']]['stopped'])
+
+    def test_a_clean_agent_run_keeps_a_stopped_stamp_stopped(self):
+        self.write(paragraphs(20))
+        self.run_step()
+        self.write(paragraphs(19))
+        self.run_step()
+        self.user_types(text_of(self.run_step('stop')), 'accept')
+        self.run_step('stop')
+        self.run_step('reviewed')
+        self.assertTrue(prose.read_stamp(self.doc.read_text())['stopped'])
+        self.assertTrue(agent_adds_and_distills(self.doc, self.doc.read_text())[0])
+        self.assertTrue(prose.read_stamp(self.doc.read_text())['stopped'])
+
+    def test_a_preset_named_for_an_agent_run_judges_that_run_only_and_says_so(self):
+        self.distill_fresh()
+        pending.record_prompt('s1', 'go with relaxed')
+        done, lines = agent_adds_and_distills(self.doc, self.doc.read_text(), preset='relaxed')
+        self.assertTrue(done)
+        self.assertIn('relaxed judged this run only. The stamp keeps its own preset, aggressive.', lines)
+        self.assertEqual(prose.read_stamp(self.doc.read_text())['preset'], 'aggressive')
+
+    def test_an_agent_run_on_the_stamps_preset_says_nothing_about_presets(self):
+        self.distill_fresh()
+        pending.record_prompt('s1', 'aggressive is fine')
+        done, lines = agent_adds_and_distills(self.doc, self.doc.read_text(), preset='aggressive')
+        self.assertTrue(done)
+        self.assertNotIn('judged this run only', text_of((done, lines)))
+
+    def test_a_doc_relinked_by_path_is_judged_on_its_entrys_preset(self):
+        pending.record_prompt('s1', 'Distill guide.md, relaxed.')
+        self.write(paragraphs(20))
+        self.run_step(preset='relaxed')
+        self.write(paragraphs(19))
+        self.run_step()
+        self.write(paragraphs(14))
+        self.run_step()
+        self.assertTrue(self.run_step('reviewed')[0])
+        self.assertEqual(prose.read_stamp(self.doc.read_text())['preset'], 'relaxed')
+
+        stamped = prose.body(self.doc.read_text())
+        pending.before_edit('s1', self.doc)
+        self.write(stamped + '\n' + paragraphs(6, tag='a'))
+        pending.after_edit('s1', self.doc)
+        self.assertIn('It is distilled (relaxed)', text_of(self.run_step('agent')))
+
+    def test_a_full_run_scoped_to_new_text_keeps_the_stamps_curve(self):
+        self.distill_fresh()
+        self.assertTrue(distill_addition(self.doc, self.doc.read_text(), 'n')[0])  # 60->30
+        stamp = prose.read_stamp(self.doc.read_text())
+        self.assertEqual(stamp['curve'], [200, 90])
+        self.assertEqual(json.loads((self.dir / '.distill.json').read_text())[stamp['id']]['curve'], [200, 90])
+
+    def test_accepting_text_after_a_stalled_agent_run_marks_stopped_and_keeps_the_curve(self):
+        self.distill_fresh()
+        stamped = self.doc.read_text()
+        pending.before_edit('s1', self.doc)
+        self.write(stamped + '\n' + prose_words(200))
+        pending.after_edit('s1', self.doc)
+        self.run_step('agent')
+        for _ in range(5):
+            self.write(stamped + '\n' + prose_words(100))  # a grammar pass that cuts, refused every time
+            result = text_of(self.run_step())
+        self.assertIn('STALLED', result)
+        self.user_types(text_of(self.run_step('stop')), 'accept')  # the stall ended the session; this starts one
+        self.assertIn('Next: a blind review', text_of(self.run_step('stop')))
+        self.assertTrue(self.run_step('reviewed')[0])
+        stamp = prose.read_stamp(self.doc.read_text())
+        self.assertEqual((stamp['curve'], stamp['stopped']), ([200, 90], True))
 
     def test_a_pass_that_invents_an_anchor_is_refused(self):
         self.write(paragraphs(19) + '\nThe server listens on port 3000 by default here.\n')
@@ -521,6 +654,57 @@ class Git(unittest.TestCase):
 
         self.doc.write_text(self.doc.read_text() + '\n' + paragraphs(6, tag='n'))
         self.commit()  # later commits do not move the reference point
+        self.assertIn('60 prose words to distill (new since the stamp)', text_of(distill.step(self.doc)))
+
+    def test_an_agent_run_keeps_the_stamps_curve_and_moves_the_reference_point(self):
+        self.doc.write_text(paragraphs(20))
+        self.commit()
+        for n in (20, 19, 14, 9):
+            self.doc.write_text(paragraphs(n))
+            distill.step(self.doc)
+        distill.step(self.doc, 'reviewed')
+        self.commit()
+        before = prose.read_stamp(self.doc.read_text())
+
+        self.assertTrue(agent_adds_and_distills(self.doc, self.doc.read_text())[0])
+        after = prose.read_stamp(self.doc.read_text())
+        self.assertEqual((after['preset'], after['curve'], after['stopped']),
+                         (before['preset'], [200, 90], False))
+        self.commit()
+
+        # The agent's distilled text is not billed again by a later full run.
+        self.doc.write_text(self.doc.read_text() + '\n' + paragraphs(6, tag='n'))
+        self.assertIn('60 prose words to distill (new since the stamp)', text_of(distill.step(self.doc)))
+
+    def test_an_agent_run_on_a_tracked_doc_that_lost_its_stamp_line_keeps_the_committed_curve(self):
+        self.doc.write_text(paragraphs(20))
+        self.commit()
+        for n in (20, 19, 14, 9):
+            self.doc.write_text(paragraphs(n))
+            distill.step(self.doc)
+        distill.step(self.doc, 'reviewed')
+        self.commit()
+
+        self.assertTrue(agent_adds_and_distills(self.doc, prose.body(self.doc.read_text()))[0])
+        stamp = prose.read_stamp(self.doc.read_text())
+        self.assertEqual((stamp['preset'], stamp['curve'], stamp['stopped']), ('aggressive', [200, 90], False))
+        self.commit()
+        self.doc.write_text(self.doc.read_text() + '\n' + paragraphs(6, tag='n'))
+        self.assertIn('60 prose words to distill (new since the stamp)', text_of(distill.step(self.doc)))
+
+    def test_a_full_run_that_writes_the_same_stamp_line_still_moves_the_reference_point(self):
+        self.doc.write_text(paragraphs(20))
+        self.commit()
+        for n in (20, 19, 14, 9):
+            self.doc.write_text(paragraphs(n))
+            distill.step(self.doc)
+        distill.step(self.doc, 'reviewed')
+        self.commit()
+        for tag in ('n', 'm'):  # both runs come out at 60->30
+            self.assertTrue(distill_addition(self.doc, self.doc.read_text(), tag)[0])
+            self.commit()
+
+        self.doc.write_text(self.doc.read_text() + '\n' + paragraphs(6, tag='k'))
         self.assertIn('60 prose words to distill (new since the stamp)', text_of(distill.step(self.doc)))
 
     def test_a_repo_that_runs_the_gate_gets_the_gate(self):

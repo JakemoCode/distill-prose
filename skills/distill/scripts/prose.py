@@ -34,13 +34,18 @@ def _tokens(text):
     return sum(1 for token in _SYNTAX.sub(' ', text).split() if _LETTER.search(token))
 
 
+def is_fence(line):
+    """A code fence line. Only ``` counts, as in docs-distillation-gate's counter."""
+    return line.lstrip().startswith('```')
+
+
 def count_words(text):
     """(prose, hidden): what a reader reads, and words kept out of that count."""
     prose = 0
     hidden = 0
     fenced = False
     for line in text.split('\n'):
-        if line.lstrip().startswith('```'):
+        if is_fence(line):
             fenced = not fenced
             continue
         trimmed = line.strip()
@@ -53,7 +58,7 @@ def count_words(text):
 
 
 def fences_balance(text):
-    return sum(1 for line in text.split('\n') if line.lstrip().startswith('```')) % 2 == 0
+    return sum(1 for line in text.split('\n') if is_fence(line)) % 2 == 0
 
 
 def verdict(counts, preset=DEFAULT_PRESET):
@@ -87,8 +92,9 @@ def curve_of(counts):
 
 # Stamps -------------------------------------------------------------------
 
+STAMP_START = '<!-- distill-prose '
 STAMP = re.compile(
-    r'^<!-- distill-prose (?P<id>[0-9a-f]+) (?P<preset>aggressive|moderate|relaxed) '
+    rf'^{re.escape(STAMP_START)}(?P<id>[0-9a-f]+) (?P<preset>aggressive|moderate|relaxed) '
     r'(?P<peak>\d+)->(?P<final>\d+)(?P<stopped> stopped)? -->$'
 )
 GATE_STAMP = re.compile(r'^<!-- distilled: ')
@@ -122,7 +128,7 @@ def read_stamp(text):
 
 
 def format_stamp(stamp_id, preset, peak, final, stopped=False):
-    return f"<!-- distill-prose {stamp_id} {preset} {peak}->{final}{' stopped' if stopped else ''} -->"
+    return f"{STAMP_START}{stamp_id} {preset} {peak}->{final}{' stopped' if stopped else ''} -->"
 
 
 def body(text):
@@ -178,13 +184,13 @@ def blocks(text):
     while index < len(lines):
         line = lines[index]
         stripped = line.strip()
-        if stripped.startswith('```'):
+        if is_fence(line):
             flush()
             fence = [line]
             index += 1
             while index < len(lines):
                 fence.append(lines[index])
-                if lines[index].strip().startswith('```'):
+                if is_fence(lines[index]):
                     break
                 index += 1
             result.append(_block(fence))
@@ -273,7 +279,7 @@ def anchors(block_texts):
     """The exact-match facts in some blocks: their code, identifiers and numbers."""
     found = set()
     for text in block_texts:
-        if text.lstrip().startswith('```'):
+        if is_fence(text):
             found.add(_squash('\n'.join(text.split('\n')[1:-1])))
             continue
         for line in text.split('\n'):
@@ -292,7 +298,7 @@ def invented(block_texts, draft):
     """
     keys = set()
     for text in block_texts:
-        if text.lstrip().startswith('```'):
+        if is_fence(text):
             keys.update(_squash(line) for line in text.split('\n')[1:-1] if line.strip())
         else:
             keys.update(anchor.strip('`') for anchor in anchors([text]))

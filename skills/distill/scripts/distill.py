@@ -116,9 +116,14 @@ def stamp_commit_text(root, doc, stamp_line):
     return None
 
 
-def reference(doc, text, root, tracked):
+def committed_stamp(root, doc):
+    """The stamp in the doc's last commit, or None."""
+    shown = git(root, 'show', f'HEAD:{doc.relative_to(root).as_posix()}')
+    return prose.read_stamp(shown.stdout) if shown.returncode == 0 else None
+
+
+def reference(doc, text, root, tracked, stamp):
     """(blocks, stamp id, notice) for the version new text is measured against."""
-    stamp = prose.read_stamp(text)
     current = prose.block_list(prose.body(text))
 
     if tracked:
@@ -292,8 +297,14 @@ def start(doc, text, preset, agent_only):
         ]
 
     stamp = prose.read_stamp(text)
+    if stamp is None and tracked and agent_only:
+        # The hooks only bill a stamped doc, so the agent's edit dropped the
+        # line. The last commit still carries it.
+        stamp = committed_stamp(repo, doc)
+        if stamp:
+            lines.append(f'{doc.name} lost its stamp line; read stamp {stamp["id"]} from its last commit.')
     current = prose.block_list(prose.body(text))
-    ref, stamp_id, notice = reference(doc, text, repo, tracked)
+    ref, stamp_id, notice = reference(doc, text, repo, tracked, stamp)
     if notice:
         lines.append(notice)
 
@@ -301,7 +312,8 @@ def start(doc, text, preset, agent_only):
         owed = pending.owed(doc)
         ref = agent_reference(current, owed)
 
-    chosen = preset or (stamp['preset'] if stamp else prose.DEFAULT_PRESET)
+    known = stamp or (load_sidecar(doc.parent).get(stamp_id) if stamp_id and not tracked else None)
+    chosen = preset or (known['preset'] if known else prose.DEFAULT_PRESET)
     count = prose.billed(ref, current)
     fresh = stamp is None and stamp_id is None
 
@@ -334,6 +346,7 @@ def start(doc, text, preset, agent_only):
         'peak_hidden': prose.count_words(text)[1],
         'reviewed_at': None,
         'stopped': False,
+        'stamp': known,  # as the session found it; a pass can edit or drop the line
     }
     save_state(folder, root, state)
     (folder / 'peak.md').write_text(text)
@@ -354,7 +367,23 @@ def start(doc, text, preset, agent_only):
 
 
 def finish(doc, text, state, folder, curve, reason):
-    stamp_line = prose.format_stamp(state['stamp_id'], state['preset'], curve[0], curve[-1], state['stopped'])
+    stamp_id = state['stamp_id']
+    preset, ends, stopped = state['preset'], [curve[0], curve[-1]], state['stopped']
+    found = state['stamp'] if 'stamp' in state else prose.read_stamp(text)  # sessions before 0.3.4
+    notes = []
+    if state['reference'] and found:
+        # A run scoped to new text since the stamp, --agent or full, measured
+        # that text, so its curve says nothing about the doc. The stamp keeps
+        # describing the doc, and a user's accept still marks it, so it never
+        # overstates the distillation.
+        if preset != found['preset']:
+            notes.append(f"{preset} judged this run only. The stamp keeps its own preset, {found['preset']}.")
+        preset, ends, stopped = found['preset'], found['curve'], found['stopped'] or stopped
+    if state['tracked']:
+        # The reference is the commit that changed the stamp line, and a scoped
+        # run keeps the curve. A new ID makes the line one no commit has carried.
+        stamp_id = secrets.token_hex(3)
+    stamp_line = prose.format_stamp(stamp_id, preset, ends[0], ends[-1], stopped)
     stamped = prose.write_stamp(text, stamp_line)
     doc.write_text(stamped)
 
@@ -362,11 +391,11 @@ def finish(doc, text, state, folder, curve, reason):
         tail = f'Commit {doc.name} now. The stamp is only a reference point once a commit carries it.'
     else:
         entries = load_sidecar(doc.parent)
-        entries[state['stamp_id']] = {
+        entries[stamp_id] = {
             'path': doc.name,
-            'preset': state['preset'],
-            'curve': [curve[0], curve[-1]],
-            'stopped': state['stopped'],
+            'preset': preset,
+            'curve': ends,
+            'stopped': stopped,
             'blocks': prose.block_list(prose.body(stamped)),
         }
         save_sidecar(doc.parent, entries)
@@ -376,7 +405,7 @@ def finish(doc, text, state, folder, curve, reason):
     close(folder)
     percent = f'{curve[-1] / curve[0] * 100:.1f}%'
     return [f'DONE. {doc.name} distilled ({reason}): {"->".join(map(str, curve))} ({percent}). {tail}',
-            f'Stamp: {stamp_line}']
+            *notes, f'Stamp: {stamp_line}']
 
 
 def step(doc, flag=None, preset=None):
