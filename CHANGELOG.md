@@ -13,7 +13,7 @@ All notable changes to distill-prose. The format follows [Keep a Changelog](http
 
 ### Changed
 
-- A grammar pass may raise the count by at most 10%. A larger one is refused and nothing is recorded, because targets are shares of the longest draft and a grammar pass that grows the doc moves the finish line.
+- No pass may take the count more than 10% above the draft. One that does is refused and nothing is recorded, because targets are shares of the longest draft and a pass that grows the doc moves the finish line. A restoration after the review keeps its own 10% allowance against the reviewed count.
 
 ## 0.3.2 - 2026-09-25
 

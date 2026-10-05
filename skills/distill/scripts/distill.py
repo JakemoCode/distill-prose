@@ -29,7 +29,7 @@ import prose  # noqa: E402
 SCRATCH = '.distill'
 SIDECAR = '.distill.json'
 GRAMMAR_FLOOR = 0.90  # a grammar pass keeps at least this share of the count
-GRAMMAR_CEILING = 1.10  # and grows it to at most this share, since targets are shares of the peak
+GROWTH_CEILING = 1.10  # no pass takes the count above this share of the draft; targets are shares of the peak
 SHAPE_FLOOR = 0.70  # a shape pass reorganizes; it removes connective words at most
 STALL_ATTEMPTS = 5  # attempts in a row that were refused or cut under the weak-pass share
 RESTORE_ALLOWANCE = 0.10  # how far restorations after the review may raise the count
@@ -169,7 +169,8 @@ def phase_instruction(number, scoped):
             'and piece of deliberate emphasis. Add nothing the draft does not say.')
     if number == 1:
         return (f'Pass 1 (grammar): rewrite {where} in ASD-STE100 Simplified Technical English. '
-                f'Change grammar only; the count may rise by at most {round((GRAMMAR_CEILING - 1) * 100)}%. {keep}')
+                f'Change grammar only; the count may rise, but no pass may take it more than '
+                f'{round((GROWTH_CEILING - 1) * 100)}% above the draft. {keep}')
     if number == 2:
         return (f'Pass 2 (shape): where the content allows, turn {where} into a procedure, a table, '
                 f'or a list. Reorganize; do not delete. {keep}')
@@ -457,11 +458,13 @@ def step(doc, flag=None, preset=None):
                        'cannot act correctly without, then run this again. Nothing was recorded.'])
 
     if count != points[-1]:
-        if passes == 0 and count > points[0] * GRAMMAR_CEILING:
-            return no_progress(doc, folder, root, state, [f'Pass 1 took the prose from {points[0]} to {count} words. A grammar pass '
-                           f'may add at most {round((GRAMMAR_CEILING - 1) * 100)}%, to {int(points[0] * GRAMMAR_CEILING)}. '
-                           'The targets are shares of the longest draft, so a grammar pass that grows the doc moves the finish line.',
-                           f'Run `{run_line(doc, "--undo")}` and redo pass 1. Nothing was recorded.'])
+        # A restoration after the review has its own allowance, checked above.
+        if asked is None and count > points[0] * GROWTH_CEILING:
+            return no_progress(doc, folder, root, state, [f'Pass {len(points)} took the prose from {points[-1]} to {count} words. '
+                           f'No pass may take it more than {round((GROWTH_CEILING - 1) * 100)}% above the draft\'s '
+                           f'{points[0]}, to {int(points[0] * GROWTH_CEILING)}. The targets are shares of the longest draft, '
+                           'so a pass that grows the doc moves the finish line.',
+                           f'Run `{run_line(doc, "--undo")}` and redo pass {len(points)}. Nothing was recorded.'])
         if passes == 0 and count < points[0] * GRAMMAR_FLOOR:
             return no_progress(doc, folder, root, state, [f'Pass 1 removed {(1 - count / points[0]) * 100:.0f}% of the prose. The grammar pass '
                            'changes grammar only; cutting comes later, once the grammar shows what is empty.',

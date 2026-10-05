@@ -371,7 +371,7 @@ class Session(unittest.TestCase):
         self.write(prose_words(221))
         done, lines = self.run_step()
         self.assertIn('from 200 to 221 words', text_of((done, lines)))
-        self.assertIn('at most 10%, to 220', text_of((done, lines)))
+        self.assertIn("more than 10% above the draft's 200, to 220", text_of((done, lines)))
         self.assertIn('Nothing was recorded', text_of((done, lines)))
         self.assertIn('--undo', text_of((done, lines)))
         state = distill.load_state(distill.session_dir(self.doc)[0])
@@ -386,6 +386,36 @@ class Session(unittest.TestCase):
         self.assertIn('Pass 2 (shape)', text_of(self.run_step()))
         state = distill.load_state(distill.session_dir(self.doc)[0])
         self.assertEqual(state['points'], [150, 165])
+
+    def test_a_shape_pass_that_takes_the_count_past_the_cap_is_refused(self):
+        self.curve(200, 210)
+        self.write(prose_words(221))
+        done, lines = self.run_step()
+        self.assertIn('Pass 2 took the prose from 210 to 221 words', text_of((done, lines)))
+        self.assertIn('Nothing was recorded', text_of((done, lines)))
+        state = distill.load_state(distill.session_dir(self.doc)[0])
+        self.assertEqual(state['points'], [200, 210])
+
+    def test_a_fluff_pass_that_takes_the_count_past_the_cap_is_refused(self):
+        self.curve(200, 205, 200)
+        self.write(prose_words(221))
+        self.assertIn('Pass 3 took the prose from 200 to 221 words', text_of(self.run_step()))
+        state = distill.load_state(distill.session_dir(self.doc)[0])
+        self.assertEqual(state['points'], [200, 205, 200])
+
+    def test_a_later_pass_exactly_at_the_cap_is_accepted(self):
+        self.curve(150, 155)
+        self.write(prose_words(165))  # 150 * 1.10, exact in floating point
+        self.assertIn('Pass 3 (fluff)', text_of(self.run_step()))
+
+    def test_a_restore_after_the_review_keeps_its_own_allowance_past_the_cap(self):
+        # Stopped at 220, the review allows up to 242, above the draft's cap of 220.
+        self.curve(200, 220)
+        self.user_types(text_of(self.run_step('stop')), 'accept')
+        self.assertIn('Next: a blind review', text_of(self.run_step('stop')))
+        self.write(prose_words(230))
+        done, lines = self.run_step('reviewed')
+        self.assertTrue(done, text_of((done, lines)))
 
     def test_editing_a_code_block_the_agent_wrote_is_not_editing_old_text(self):
         self.distill_fresh()
