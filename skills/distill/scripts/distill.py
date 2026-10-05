@@ -371,19 +371,19 @@ def finish(doc, text, state, folder, curve, reason):
     preset, ends, stopped = state['preset'], [curve[0], curve[-1]], state['stopped']
     found = state['stamp'] if 'stamp' in state else prose.read_stamp(text)  # sessions before 0.3.4
     notes = []
-    if state['agent_only'] and found:
-        # An --agent run distilled the agent's additions, so its curve says
-        # nothing about the doc. The stamp keeps describing the doc, and a
-        # user's accept still marks it, so it never overstates the distillation.
+    if state['reference'] and found:
+        # A run scoped to new text since the stamp, --agent or full, measured
+        # that text, so its curve says nothing about the doc. The stamp keeps
+        # describing the doc, and a user's accept still marks it, so it never
+        # overstates the distillation.
         if preset != found['preset']:
             notes.append(f"{preset} judged this run only. The stamp keeps its own preset, {found['preset']}.")
         preset, ends, stopped = found['preset'], found['curve'], found['stopped'] or stopped
-    stamp_line = prose.format_stamp(stamp_id, preset, ends[0], ends[-1], stopped)
-    if state['tracked'] and found and stamp_line == found['line']:
-        # The reference is the commit that changed this line. An unchanged line
-        # leaves the old commit as the reference and bills distilled text again.
+    if state['tracked']:
+        # The reference is the commit that changed the stamp line, and a scoped
+        # run keeps the curve. A new ID makes the line one no commit has carried.
         stamp_id = secrets.token_hex(3)
-        stamp_line = prose.format_stamp(stamp_id, preset, ends[0], ends[-1], stopped)
+    stamp_line = prose.format_stamp(stamp_id, preset, ends[0], ends[-1], stopped)
     stamped = prose.write_stamp(text, stamp_line)
     doc.write_text(stamped)
 

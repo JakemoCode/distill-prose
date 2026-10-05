@@ -141,7 +141,9 @@ class Session(unittest.TestCase):
 
     def test_distilling_the_agents_text_settles_what_it_owed(self):
         self.distill_fresh()
-        self.assertTrue(agent_adds_and_distills(self.doc, self.doc.read_text())[0])
+        done, lines = agent_adds_and_distills(self.doc, self.doc.read_text())
+        self.assertTrue(done)
+        self.assertIn('60->58->50->30', text_of((done, lines)))  # billed and distilled, not under the floor
         self.assertEqual(pending.owed(self.doc), {})
 
     def test_an_agent_run_keeps_the_stamps_curve_and_refreshes_the_sidecar_blocks(self):
@@ -239,12 +241,29 @@ class Session(unittest.TestCase):
         pending.after_edit('s1', self.doc)
         self.assertIn('It is distilled (relaxed)', text_of(self.run_step('agent')))
 
-    def test_a_full_run_on_a_stamped_doc_writes_its_own_curve(self):
+    def test_a_full_run_scoped_to_new_text_keeps_the_stamps_curve(self):
         self.distill_fresh()
-        self.assertTrue(distill_addition(self.doc, self.doc.read_text(), 'n')[0])
+        self.assertTrue(distill_addition(self.doc, self.doc.read_text(), 'n')[0])  # 60->30
         stamp = prose.read_stamp(self.doc.read_text())
-        self.assertEqual(stamp['curve'], [60, 30])
-        self.assertEqual(json.loads((self.dir / '.distill.json').read_text())[stamp['id']]['curve'], [60, 30])
+        self.assertEqual(stamp['curve'], [200, 90])
+        self.assertEqual(json.loads((self.dir / '.distill.json').read_text())[stamp['id']]['curve'], [200, 90])
+
+    def test_accepting_text_after_a_stalled_agent_run_marks_stopped_and_keeps_the_curve(self):
+        self.distill_fresh()
+        stamped = self.doc.read_text()
+        pending.before_edit('s1', self.doc)
+        self.write(stamped + '\n' + prose_words(200))
+        pending.after_edit('s1', self.doc)
+        self.run_step('agent')
+        for _ in range(5):
+            self.write(stamped + '\n' + prose_words(100))  # a grammar pass that cuts, refused every time
+            result = text_of(self.run_step())
+        self.assertIn('STALLED', result)
+        self.user_types(text_of(self.run_step('stop')), 'accept')  # the stall ended the session; this starts one
+        self.assertIn('Next: a blind review', text_of(self.run_step('stop')))
+        self.assertTrue(self.run_step('reviewed')[0])
+        stamp = prose.read_stamp(self.doc.read_text())
+        self.assertEqual((stamp['curve'], stamp['stopped']), ([200, 90], True))
 
     def test_a_pass_that_invents_an_anchor_is_refused(self):
         self.write(paragraphs(19) + '\nThe server listens on port 3000 by default here.\n')
