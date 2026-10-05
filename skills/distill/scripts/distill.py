@@ -334,6 +334,7 @@ def start(doc, text, preset, agent_only):
         'peak_hidden': prose.count_words(text)[1],
         'reviewed_at': None,
         'stopped': False,
+        'stamp': stamp,  # as the session found it; a pass can edit or drop the line
     }
     save_state(folder, root, state)
     (folder / 'peak.md').write_text(text)
@@ -354,7 +355,21 @@ def start(doc, text, preset, agent_only):
 
 
 def finish(doc, text, state, folder, curve, reason):
-    stamp_line = prose.format_stamp(state['stamp_id'], state['preset'], curve[0], curve[-1], state['stopped'])
+    stamp_id = state['stamp_id']
+    preset, ends, stopped = state['preset'], [curve[0], curve[-1]], state['stopped']
+    found = state['stamp'] if 'stamp' in state else prose.read_stamp(text)  # sessions before 0.3.4
+    if state['agent_only']:
+        kept = found or (None if state['tracked'] else load_sidecar(doc.parent).get(stamp_id))
+        if kept:
+            # An --agent run distilled the agent's additions, so its curve says
+            # nothing about the doc. The stamp keeps describing the doc.
+            preset, ends, stopped = kept['preset'], kept['curve'], kept['stopped']
+    stamp_line = prose.format_stamp(stamp_id, preset, ends[0], ends[-1], stopped)
+    if state['tracked'] and found and stamp_line == found['line']:
+        # The reference is the commit that changed this line. An unchanged line
+        # leaves the old commit as the reference and bills distilled text again.
+        stamp_id = secrets.token_hex(3)
+        stamp_line = prose.format_stamp(stamp_id, preset, ends[0], ends[-1], stopped)
     stamped = prose.write_stamp(text, stamp_line)
     doc.write_text(stamped)
 
@@ -362,11 +377,11 @@ def finish(doc, text, state, folder, curve, reason):
         tail = f'Commit {doc.name} now. The stamp is only a reference point once a commit carries it.'
     else:
         entries = load_sidecar(doc.parent)
-        entries[state['stamp_id']] = {
+        entries[stamp_id] = {
             'path': doc.name,
-            'preset': state['preset'],
-            'curve': [curve[0], curve[-1]],
-            'stopped': state['stopped'],
+            'preset': preset,
+            'curve': ends,
+            'stopped': stopped,
             'blocks': prose.block_list(prose.body(stamped)),
         }
         save_sidecar(doc.parent, entries)

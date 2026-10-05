@@ -31,6 +31,29 @@ def text_of(result):
     return '\n'.join(result[1])
 
 
+def distill_addition(doc, base, tag):
+    """A full run on 60 words added to a stamped doc, through grammar, shape and fluff to DONE."""
+    shorter = paragraphs(6, tag=tag).replace('juliet\n', '\n', 2)  # grammar: 58
+    for addition in (paragraphs(6, tag=tag), shorter, paragraphs(5, tag=tag), paragraphs(3, tag=tag)):
+        doc.write_text(base + '\n' + addition)
+        distill.step(doc)
+    return distill.step(doc, 'reviewed')
+
+
+def agent_adds_and_distills(doc, base):
+    """The agent writes `base` plus 60 words into a stamped doc, then the Stop
+    hook's --agent run takes those words through grammar, shape and fluff to DONE."""
+    pending.before_edit('s1', doc)
+    doc.write_text(base + '\n' + paragraphs(6, tag='a'))
+    pending.after_edit('s1', doc)
+    distill.step(doc, 'agent')
+    shorter = paragraphs(6, tag='a').replace('juliet\n', '\n', 2)  # grammar: 58
+    for addition in (shorter, paragraphs(5, tag='a'), paragraphs(3, tag='a')):
+        doc.write_text(base + '\n' + addition)
+        distill.step(doc)
+    return distill.step(doc, 'reviewed')
+
+
 class Session(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -118,19 +141,50 @@ class Session(unittest.TestCase):
 
     def test_distilling_the_agents_text_settles_what_it_owed(self):
         self.distill_fresh()
+        self.assertTrue(agent_adds_and_distills(self.doc, self.doc.read_text())[0])
+        self.assertEqual(pending.owed(self.doc), {})
+
+    def test_an_agent_run_keeps_the_stamps_curve_and_refreshes_the_sidecar_blocks(self):
+        self.distill_fresh()
+        before = prose.read_stamp(self.doc.read_text())
+        self.assertTrue(agent_adds_and_distills(self.doc, self.doc.read_text())[0])
+        after = prose.read_stamp(self.doc.read_text())
+        self.assertEqual((after['id'], after['preset'], after['curve'], after['stopped']),
+                         (before['id'], 'aggressive', [200, 90], False))
+        entry = json.loads((self.dir / '.distill.json').read_text())[after['id']]
+        self.assertEqual(entry['curve'], [200, 90])
+        self.assertEqual(entry['blocks'], prose.block_list(prose.body(self.doc.read_text())))
+
+    def test_an_agent_run_that_drops_the_stamp_line_keeps_the_docs_curve(self):
+        self.distill_fresh()
+        before = prose.read_stamp(self.doc.read_text())
+        self.assertTrue(agent_adds_and_distills(self.doc, prose.body(self.doc.read_text()))[0])
+        after = prose.read_stamp(self.doc.read_text())
+        self.assertEqual((after['id'], after['preset'], after['curve']), (before['id'], 'aggressive', [200, 90]))
+        self.assertEqual(json.loads((self.dir / '.distill.json').read_text())[after['id']]['curve'], [200, 90])
+
+    def test_an_agent_run_that_edits_the_stamp_line_keeps_the_docs_curve(self):
+        self.distill_fresh()
         stamped = self.doc.read_text()
         pending.before_edit('s1', self.doc)
         self.write(stamped + '\n' + paragraphs(6, tag='a'))
         pending.after_edit('s1', self.doc)
-        self.assertEqual(sum(pending.owed(self.doc).values()), 60)
-
         self.run_step('agent')
+        # The stamp line is outside every block, so no check stops a pass from editing it.
+        edited = prose.write_stamp(stamped, prose.format_stamp(prose.read_stamp(stamped)['id'], 'aggressive', 120, 60))
         shorter = paragraphs(6, tag='a').replace('juliet\n', '\n', 2)  # grammar: 58
         for addition in (shorter, paragraphs(5, tag='a'), paragraphs(3, tag='a')):
-            self.write(stamped + '\n' + addition)
+            self.write(edited + '\n' + addition)
             self.run_step()
         self.assertTrue(self.run_step('reviewed')[0])
-        self.assertEqual(pending.owed(self.doc), {})
+        self.assertEqual(prose.read_stamp(self.doc.read_text())['curve'], [200, 90])
+
+    def test_a_full_run_on_a_stamped_doc_writes_its_own_curve(self):
+        self.distill_fresh()
+        self.assertTrue(distill_addition(self.doc, self.doc.read_text(), 'n')[0])
+        stamp = prose.read_stamp(self.doc.read_text())
+        self.assertEqual(stamp['curve'], [60, 30])
+        self.assertEqual(json.loads((self.dir / '.distill.json').read_text())[stamp['id']]['curve'], [60, 30])
 
     def test_a_pass_that_invents_an_anchor_is_refused(self):
         self.write(paragraphs(19) + '\nThe server listens on port 3000 by default here.\n')
@@ -521,6 +575,41 @@ class Git(unittest.TestCase):
 
         self.doc.write_text(self.doc.read_text() + '\n' + paragraphs(6, tag='n'))
         self.commit()  # later commits do not move the reference point
+        self.assertIn('60 prose words to distill (new since the stamp)', text_of(distill.step(self.doc)))
+
+    def test_an_agent_run_keeps_the_stamps_curve_and_moves_the_reference_point(self):
+        self.doc.write_text(paragraphs(20))
+        self.commit()
+        for n in (20, 19, 14, 9):
+            self.doc.write_text(paragraphs(n))
+            distill.step(self.doc)
+        distill.step(self.doc, 'reviewed')
+        self.commit()
+        before = prose.read_stamp(self.doc.read_text())
+
+        self.assertTrue(agent_adds_and_distills(self.doc, self.doc.read_text())[0])
+        after = prose.read_stamp(self.doc.read_text())
+        self.assertEqual((after['preset'], after['curve'], after['stopped']),
+                         (before['preset'], [200, 90], False))
+        self.commit()
+
+        # The agent's distilled text is not billed again by a later full run.
+        self.doc.write_text(self.doc.read_text() + '\n' + paragraphs(6, tag='n'))
+        self.assertIn('60 prose words to distill (new since the stamp)', text_of(distill.step(self.doc)))
+
+    def test_a_full_run_that_writes_the_same_stamp_line_still_moves_the_reference_point(self):
+        self.doc.write_text(paragraphs(20))
+        self.commit()
+        for n in (20, 19, 14, 9):
+            self.doc.write_text(paragraphs(n))
+            distill.step(self.doc)
+        distill.step(self.doc, 'reviewed')
+        self.commit()
+        for tag in ('n', 'm'):  # both runs come out at 60->30
+            self.assertTrue(distill_addition(self.doc, self.doc.read_text(), tag)[0])
+            self.commit()
+
+        self.doc.write_text(self.doc.read_text() + '\n' + paragraphs(6, tag='k'))
         self.assertIn('60 prose words to distill (new since the stamp)', text_of(distill.step(self.doc)))
 
     def test_a_repo_that_runs_the_gate_gets_the_gate(self):

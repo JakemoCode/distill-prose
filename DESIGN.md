@@ -43,6 +43,8 @@ Decisions from the design grilling on 2026-09-23, with the reason for each. Chan
 - Untracked docs: one `.distill.json` per folder, keyed by stamp ID, holding each doc's path, preset, curve and `[hash, words]` per block. It holds no doc text. It is JSON because Python's standard library cannot read YAML.
 - A stamp with no sidecar entry gets a soft notice, and the skill trusts the stamp. A doc that lost its stamp re-links to its entry by path.
 - The stamp moves only on a real distillation. Additions under the 50-word floor accumulate until they cross it.
+- An `--agent` run keeps the stamp's preset, curve and stopped flag, by decision on 2026-10-05. Its curve measures the agent's additions, not the doc, and once wrote `relaxed 89->75` over a doc's `relaxed 7741->6599`. The script reads the stamp when the run starts, or the sidecar entry when the doc lost its stamp line, because a pass can edit or drop the line and no check guards it. The run still rewrites the stamp so later edits bill from there, and an untracked doc's sidecar entry gets its blocks refreshed with its curve unchanged. A full run on a stamped doc writes its own curve.
+- A tracked doc's reference is found with `git log -S` on the stamp line, which only sees commits that change the line. So when a run would write the line it started with, as every `--agent` run does and two full runs with the same curve can, the stamp gets a new ID.
 - A repo that runs docs-distillation-gate gets the gate. The skill defers, and the hooks ignore gate stamps.
 
 ## Hooks

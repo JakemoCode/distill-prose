@@ -2,6 +2,13 @@
 
 All notable changes to distill-prose. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## 0.3.4 - 2026-10-05
+
+### Fixed
+
+- Distilling an agent's addition with `--agent` keeps the stamp's preset, curve and stopped flag. It used to replace them with the run's own curve, so a doc stamped `relaxed 7741->6599` came out as `relaxed 89->75` after an agent added 89 words. An untracked doc's sidecar entry still gets its blocks refreshed. A pass that edits or drops the stamp line no longer changes what the stamp keeps.
+- A run on a tracked doc that would write the stamp line it started with gets a new stamp ID. With the same line, the next commit never became the reference point, so text already distilled was billed again.
+
 ## 0.3.3 - 2026-10-05
 
 ### Fixed
