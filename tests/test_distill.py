@@ -317,6 +317,54 @@ class Session(unittest.TestCase):
         self.write(prose_words(95))
         self.assertTrue(self.run_step('reviewed')[0])
 
+    def test_a_restore_within_the_allowance_finishes_a_converged_run_above_the_ceiling(self):
+        # Converges at 128 against aggressive's ceiling of 130. The restore to 135
+        # crosses the ceiling, which the 10% allowance permits.
+        self.assertIn('Next: a blind review', text_of(self.curve(200, 195, 190, 140, 136, 132, 128)))
+        self.write(prose_words(135))
+        done, lines = self.run_step('reviewed')
+        self.assertTrue(done, text_of((done, lines)))
+        self.assertIn('(converged, then restored to 135 after the review)', text_of((done, lines)))
+        self.assertEqual(prose.read_stamp(self.doc.read_text())['curve'], [200, 135])
+
+    def test_a_stricter_preset_after_the_review_is_judged_on_the_new_finish_line(self):
+        pending.record_prompt('s1', 'Distill guide.md, moderate.')
+        self.assertIn('Next: a blind review',
+                      text_of(self.curve(200, 195, 190, 160, 156, 152, 148, preset='moderate')))
+        pending.record_prompt('s1', 'Actually, make it aggressive.')
+        self.assertIn('Pass 7 (fluff)', text_of(self.run_step(preset='aggressive')))
+        self.write(prose_words(100))
+        self.assertIn('Next: a blind review', text_of(self.run_step()))
+
+    def test_a_converged_reviewed_run_never_stalls_on_its_restore(self):
+        # Four weak cuts after the real one leave four fruitless attempts at
+        # convergence. The restore must not be the fifth.
+        self.assertIn('Next: a blind review', text_of(self.curve(200, 195, 190, 140, 137, 134, 131, 128)))
+        self.write(prose_words(135))
+        self.assertNotIn('STALLED', text_of(self.run_step()))  # restored, then run without the flag
+        state = distill.load_state(distill.session_dir(self.doc)[0])
+        self.assertEqual(state['fruitless'], 0)  # a restoration is not an attempt
+        self.write(prose_words(150))
+        self.assertNotIn('STALLED', text_of(self.run_step('reviewed')))  # over the allowance: refused
+        self.write(prose_words(135))
+        done, lines = self.run_step('reviewed')
+        self.assertNotIn('STALLED', text_of((done, lines)))
+        self.assertTrue(done, text_of((done, lines)))
+
+    def test_after_a_grammar_pass_raises_the_peak_the_next_pass_is_shape(self):
+        self.write(prose_words(200))
+        self.run_step()
+        self.write(prose_words(220))  # grammar, up 10%
+        self.assertIn('Pass 2 (shape)', text_of(self.run_step()))
+        self.write(prose_words(100))  # a shape pass that cuts: refused and fruitless
+        self.run_step()
+        self.write(prose_words(210))  # a valid shape pass
+        output = text_of(self.run_step())
+        self.assertIn('after 2 passes', output)  # counted the way the instruction numbers them
+        self.assertIn('Pass 3 (fluff)', output)
+        state = distill.load_state(distill.session_dir(self.doc)[0])
+        self.assertEqual(state['fruitless'], 0)
+
     def test_editing_a_code_block_the_agent_wrote_is_not_editing_old_text(self):
         self.distill_fresh()
         stamped = self.doc.read_text()

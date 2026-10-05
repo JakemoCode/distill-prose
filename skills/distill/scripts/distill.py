@@ -445,6 +445,9 @@ def step(doc, flag=None, preset=None):
         if not user_named(preset):
             return False, preset_refusal(preset)
         state['preset'] = preset
+        # A new finish line: the run is judged again, and the review waits for it.
+        for key in ('review_asked_at', 'review_asked_points', 'reviewed_at'):
+            state[key] = None
 
     asked = state.get('review_asked_at')
     if asked is not None and count > asked * (1 + RESTORE_ALLOWANCE):
@@ -463,10 +466,12 @@ def step(doc, flag=None, preset=None):
                            f'Run `{run_line(doc, "--undo")}` and redo pass 2. Nothing was recorded.'])
         # Grammar and shape passes are not meant to cut, so any valid one is
         # progress. After them, progress is a new low by the weak-pass share.
-        if passes < 2 or count <= min(points) * (1 - prose.WEAK_PASS_RATIO):
-            state['fruitless'] = 0
-        else:
-            state['fruitless'] = state.get('fruitless', 0) + 1
+        # Once the review is asked for, a change is a restoration, not an attempt.
+        if asked is None:
+            if passes < 2 or count <= min(points) * (1 - prose.WEAK_PASS_RATIO):
+                state['fruitless'] = 0
+            else:
+                state['fruitless'] = state.get('fruitless', 0) + 1
         points.append(count)
         (folder / 'last.md').write_text(text)
         if count > max(points[:-1]):
@@ -480,12 +485,16 @@ def step(doc, flag=None, preset=None):
 
     curve = prose.curve_of(points)
     passes = len(curve) - 1
-    passed, reason = prose.verdict(curve, state['preset'])
+    recorded = len(points) - 1
+    # Restorations may cross the ceiling, so a run that was distilled when the
+    # review was asked for is judged on the curve as it stood then.
+    judged = points[:state.get('review_asked_points', len(points))] if asked is not None else points
+    passed, reason = prose.verdict(prose.curve_of(judged), state['preset'])
     if state['stopped']:
         passed, reason = True, 'stopped by the user'
     if passes:
         lines.append(f'{doc.name}: {" -> ".join(map(str, curve))} prose words, '
-                     f'{curve[-1] / curve[0] * 100:.1f}% of the peak after {passes} pass{"es" if passes != 1 else ""}.')
+                     f'{curve[-1] / curve[0] * 100:.1f}% of the peak after {recorded} pass{"es" if recorded != 1 else ""}.')
 
     removed = curve[0] - curve[-1]
     parked = prose.count_words(text)[1] - state['peak_hidden']
@@ -497,17 +506,21 @@ def step(doc, flag=None, preset=None):
         if state.get('fruitless', 0) >= STALL_ATTEMPTS:
             return False, lines + stall(doc, folder, state)
         save_state(folder, root, state)
-        lines += [exits(curve[0], state['preset']), phase_instruction(passes + 1, bool(state['reference'])),
+        lines += [exits(curve[0], state['preset']), phase_instruction(len(points), bool(state['reference'])),
                   f'Then run: {run_line(doc)}']
         return False, lines
 
     if flag == 'reviewed':
         state['reviewed_at'] = count
+    if asked is not None and count > asked:
+        reason += f', then restored to {count} after the review'
     save_state(folder, root, state)
 
     if state['reviewed_at'] != count:
         if state.get('review_asked_at') is None:
             state['review_asked_at'] = count
+            state['review_asked_points'] = len(points)
+            state['fruitless'] = 0  # a distilled run is progress
             save_state(folder, root, state)
         lines += [
             f'Distilled ({reason}). Next: a blind review.',
