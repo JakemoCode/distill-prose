@@ -2,6 +2,19 @@
 
 All notable changes to distill-prose. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## 0.3.3 - 2026-10-05
+
+### Fixed
+
+- Restoring what the blind review asked for, within the 10% allowance, finishes the run even when the restored count crosses the preset's ceiling. The run is judged on its curve as it stood when the review was asked for, and the stamp records the restored count. It used to report `STALLED` and discard the run unstamped.
+- A restoration within the allowance never ends a reviewed run with `STALLED`. Reaching the review resets the count of fruitless attempts, and a restoration after it is not an attempt. Five refused restorations in a row still stall, as any five refused attempts do.
+- After a grammar pass raises the peak, the script asks for pass 2 (shape). It used to ask for pass 1 (grammar) again, so the agent's real shape pass was judged as fluff. The pass count printed with the curve now matches the instruction's numbering.
+- Changing the preset after the review was asked for judges the run against the new finish line and asks for the review again.
+
+### Changed
+
+- A grammar pass may raise the count by at most 10%. A larger one is refused and nothing is recorded, because targets are shares of the longest draft and a grammar pass that grows the doc moves the finish line.
+
 ## 0.3.2 - 2026-09-25
 
 ### Security
